@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f4f7fc">
+  <title>Отклик — начните с человека, который вам подходит</title>
+  <meta name="description" content="Локальный прототип подбора психолога: предпочтения, рекомендации и пробная запись.">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+
+  <header class="header wrap">
+    <a class="brand" href="#" aria-label="Отклик — на главную"><span class="logo-window" aria-hidden="true"><img src="assets/brand/otklik-original.jpeg" alt=""></span><span class="wordmark">отклик</span></a>
+    <nav aria-label="Основная навигация"><a href="#topics">С чем начать</a><a href="#how">Как это работает</a><a href="#questions">Вопросы</a><a href="/psychologist">Я психолог</a><a href="/client">Мои встречи</a></nav>
+    <div class="header-actions"><span class="prototype">Демо</span><button class="primary header-cta" data-start>Подобрать психолога <span aria-hidden="true">↗</span></button></div>
+  </header>
+  <main id="main">
+    <section id="home" class="wrap">
+      <div class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> Психолог ближе, чем кажется</p>
+          <h1>Найдите того,<br>с кем можно<br><em>быть собой.</em></h1>
+          <p class="hero-description">Подбор психолога для онлайн-встреч.<br>Начните с короткой анкеты — мы поможем<br class="desktop"> сориентироваться в выборе.</p>
+          <button class="primary" data-start>Подобрать психолога <span aria-hidden="true">↗</span></button>
+          <div class="hero-facts"><span><b>5</b> коротких вопросов</span><span><b>50</b> минут на встречу</span></div><p class="micro">Подбор без регистрации · видеовстречи</p><a class="hero-psychologist" href="/psychologist#register">Вы психолог? <span>Присоединиться ↗</span></a>
+        </div>
+        <div class="hero-visual"><img src="assets/illustrations/room.svg" alt="Иллюстрация: два человека беседуют в светлой комнате"><div class="visual-caption"><span class="caption-icon">✳</span><div><b>Разговор начинается с вас</b><span>Не нужно заранее знать все ответы</span></div></div><span class="visual-label">МЕСТО ДЛЯ ВАШЕГО РАЗГОВОРА</span></div>
+      </div>
+      <section id="topics" class="mood-section" aria-labelledby="mood-title"><div><p class="eyebrow">С чем можно начать</p><h2 id="mood-title">Для всего, что сейчас важно.</h2></div><div class="mood-options"><button class="mood" data-topic="anxiety"><span class="topic-icon" aria-hidden="true">≈</span><b>Тревога и напряжение</b><small>Когда сложно выдохнуть</small><span class="topic-arrow" aria-hidden="true">↗</span></button><button class="mood" data-topic="burnout"><span class="topic-icon" aria-hidden="true">◒</span><b>Усталость и выгорание</b><small>Когда нужна передышка</small><span class="topic-arrow" aria-hidden="true">↗</span></button><button class="mood" data-topic="relationships"><span class="topic-icon" aria-hidden="true">◎</span><b>Отношения</b><small>С близкими и с собой</small><span class="topic-arrow" aria-hidden="true">↗</span></button><button class="mood" data-topic="unknown"><span class="topic-icon" aria-hidden="true">✳</span><b>Хочу разобраться</b><small>Даже если пока нет слов</small><span class="topic-arrow" aria-hidden="true">↗</span></button></div><p class="micro">Выберите тему — начнём анкету с неё. Ответ можно изменить.</p></section>
+      <div class="principles"><p><span>01</span> Ваши предпочтения важны</p><p><span>02</span> Понятный выбор без спешки</p><p><span>03</span> Решение остаётся за вами</p></div>
+      <section id="how" class="section">
+        <p class="eyebrow">Как это работает</p><h2>Первый шаг проще,<br>когда есть понятный путь.</h2>
+        <div class="steps"><article><span class="step-number">01</span><h3>Расскажите о предпочтениях</h3><p>Тема, бюджет и удобное время. Не нужно разбираться в названиях подходов.</p></article><article><span class="step-number">02</span><h3>Познакомьтесь со специалистами</h3><p>Посмотрите профили и объяснение, почему они появились в рекомендациях.</p></article><article><span class="step-number">03</span><h3>Выберите время</h3><p>Создайте кабинет и отправьте заявку. Психолог подтвердит её вручную или автоматически.</p></article></div><div class="steps-cta"><button class="primary" data-start>Начать подбор <span aria-hidden="true">↗</span></button><p class="micro">Пять вопросов. Начать можно без готового запроса.</p></div>
+      </section>
+      <section class="demo-banner"><span class="demo-symbol">↗</span><div><h3>Сейчас мы собираем первую версию</h3><p>В подборе показываются одобренные тестовые профили с будущими окнами. Запись сохраняется и занимает выбранное время. Оплата и видеосвязь ещё не подключены.</p></div><span class="tag">Демо</span></section>
+      <section id="for-psychologists" class="psychologist-invite" aria-labelledby="psychologist-title"><div class="invite-copy"><p class="eyebrow">Для специалистов</p><h2 id="psychologist-title">Вы психолог?<br>Давайте знакомиться.</h2><p>Расскажите о себе и своей практике.<br>Мы рассмотрим анкету, а после одобрения<br class="desktop"> вы сможете добавить время для встреч.</p><div class="invite-actions"><a class="primary" href="/psychologist#register">Подать заявку <span aria-hidden="true">↗</span></a><a class="text-button" href="/psychologist#login">Уже есть кабинет? Войти</a></div><p class="micro">Сейчас доступна локальная проверка регистрации и заявки.</p></div></section>
+      <section id="questions" class="section faq"><div><p class="eyebrow">Можно спросить</p><h2>Перед первым <br>шагом</h2></div><div class="faq-list"><details><summary>Я не знаю, с каким запросом прийти</summary><p>В анкете можно выбрать «Пока не знаю». Для знакомства с сервисом не нужно заранее формулировать проблему.</p></details><details><summary>Как устроены рекомендации?</summary><p>В прототипе мы сопоставляем выбранную тему, бюджет и предпочтение пола с демонстрационными профилями. Это подбор по предпочтениям, а не оценка состояния или гарантия результата.</p></details><details><summary>Можно ли записаться по-настоящему?</summary><p>В локальной версии можно сохранить запись и получить подтверждение психолога. Оплата и видеосвязь ещё не подключены; публичный приём пользователей пока не открыт.</p></details><details><summary>Кто видит мои ответы?</summary><p>Ответы сохраняются в этой вкладке для продолжения записи после входа. Текст анкеты не передаётся психологу при бронировании. Сторонняя аналитика не подключена.</p></details></div></section>
+      <section class="final-cta" aria-labelledby="final-title"><div><p class="eyebrow">Когда будете готовы</p><h2 id="final-title">Начнём с того,<br>что важно вам.</h2><p>Необязательно находить правильные слова.<br>В анкете можно выбрать «Пока не знаю».</p></div><div class="final-action"><button class="primary" data-start>Подобрать психолога <span aria-hidden="true">↗</span></button><p class="micro">Подбор без регистрации</p></div></section>
+    </section>
+    <section id="flow" class="flow wrap" hidden aria-labelledby="flow-title"><div id="flow-content"></div></section>
+  </main>
+  <footer class="wrap footer site-footer"><div class="footer-top"><div><a class="brand small" href="#">отклик.</a><p>Для разговоров, которые важны.</p><span class="footer-status">Локальная демонстрация · 2026</span></div><nav class="footer-documents" aria-label="Документы и информация"><h3>Документы и информация</h3><p>Документы готовятся к запуску сервиса.</p><div class="document-links"><a href="documents.html#privacy" target="_blank" rel="noopener">Политика обработки персональных данных</a><a href="documents.html#consent" target="_blank" rel="noopener">Согласие на обработку данных</a><a href="documents.html#terms" target="_blank" rel="noopener">Пользовательское соглашение</a><a href="documents.html#offer" target="_blank" rel="noopener">Публичная оферта</a><a href="documents.html#payments" target="_blank" rel="noopener">Оплата, отмена и возврат</a><a href="/psychologist">Кабинет психолога</a><a href="/admin" target="_blank" rel="noopener">Управление профилями</a><a href="documents.html#contacts" target="_blank" rel="noopener">Контакты и реквизиты</a></div></nav></div><p class="footer-disclaimer">Пока это прототип: реальные услуги не оказываются, оплата не принимается. Ссылки открывают информацию о подготовке документов, а не действующие юридические условия.</p></footer>
+</body>
+</html>

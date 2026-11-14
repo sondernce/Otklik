@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f4f7fc">
+  <title>Отклик — начните с человека, который вам подходит</title>
+  <meta name="description" content="Локальный прототип подбора психолога: предпочтения, рекомендации и пробная запись.">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+
+  <header class="header wrap">
+    <a class="brand" href="#" aria-label="Отклик — на главную"><span class="logo-window" aria-hidden="true"><img src="assets/brand/otklik-original.jpeg" alt=""></span><span class="wordmark">отклик</span></a>
+    <nav aria-label="Основная навигация"><a href="#how">Как это работает</a><a href="#questions">Вопросы</a></nav>
+    <span class="prototype">Прототип · v0.5</span>
+  </header>
+  <main id="main">
+    <section id="home" class="wrap">
+      <div class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> Место для вашего первого шага</p>
+          <h1>Можно начать<br>с <em>«мне непросто».</em></h1>
+          <p class="hero-description">Необязательно знать, что сказать психологу.<br class="desktop"> Начнём с того, что важно вам, и поможем<br class="desktop"> сориентироваться в выборе.</p>
+          <button class="primary" data-start>Подобрать психолога <span aria-hidden="true">↗</span></button>
+          <p class="micro">5 коротких вопросов · без регистрации</p>
+        </div>
+        <div class="art dialogue-art" aria-label="Лёгкая композиция, вдохновлённая диалогом">
+          <span class="art-kicker">НАЧИНАЕТСЯ С ДИАЛОГА</span>
+          <div class="dialogue-mark" aria-hidden="true"><span></span><span></span></div><div class="thread-quote">Здесь можно<br><em>быть собой.</em></div>
+          <span class="art-caption">Быть услышанным — уже начало.</span>
+        </div>
+      </div>
+      <section class="mood-section" aria-labelledby="mood-title"><div><p class="eyebrow">Начнём с простого</p><h2 id="mood-title">Что сейчас ближе вам?</h2></div><div class="mood-options"><button class="mood" data-topic="anxiety">Много тревоги <span>↗</span></button><button class="mood" data-topic="burnout">Не хватает сил <span>↗</span></button><button class="mood" data-topic="relationships">Сложно в отношениях <span>↗</span></button><button class="mood" data-topic="unknown">Хочу разобраться <span>↗</span></button></div><p class="micro">Выберите тему — начнём анкету с неё. Ответ можно изменить.</p></section>
+      <div class="principles"><p><span>01</span> Ваши предпочтения важны</p><p><span>02</span> Понятный выбор без спешки</p><p><span>03</span> Решение остаётся за вами</p></div>
+      <section id="how" class="section">
+        <p class="eyebrow">Как это работает</p><h2>От первого вопроса<br>к первому разговору</h2>
+        <div class="steps"><article><span class="step-number">01</span><h3>Расскажите о предпочтениях</h3><p>Тема, бюджет и удобное время. Не нужно разбираться в названиях подходов.</p></article><article><span class="step-number">02</span><h3>Познакомьтесь со специалистами</h3><p>Посмотрите профили и объяснение, почему они появились в рекомендациях.</p></article><article><span class="step-number">03</span><h3>Выберите время</h3><p>В этой версии можно пройти пробную запись и оценить, насколько удобен путь.</p></article></div>
+      </section>
+      <section class="demo-banner"><span class="demo-symbol">↗</span><div><h3>Сейчас мы собираем первую версию</h3><p>Все профили и свободное время демонстрационные. Пробная заявка никуда не отправляется. Ответы не сохраняются после обновления страницы.</p></div><span class="tag">Демо</span></section>
+      <section id="questions" class="section faq"><div><p class="eyebrow">Можно спросить</p><h2>Перед первым<br>шагом</h2></div><div class="faq-list"><details><summary>Я не знаю, с каким запросом прийти</summary><p>В анкете можно выбрать «Пока не знаю». Для знакомства с сервисом не нужно заранее формулировать проблему.</p></details><details><summary>Как устроены рекомендации?</summary><p>В прототипе мы сопоставляем выбранную тему, бюджет и предпочтение пола с демонстрационными профилями. Это подбор по предпочтениям, а не оценка состояния или гарантия результата.</p></details><details><summary>Можно ли записаться по-настоящему?</summary><p>Пока нет. Здесь можно проверить путь выбора. Реальные специалисты, оплата и подтверждение встречи появятся после подготовки пилота.</p></details><details><summary>Кто видит мои ответы?</summary><p>Ответы остаются в памяти этой страницы. Мы не отправляем их на сервер и не используем стороннюю аналитику. После обновления страницы они сбрасываются.</p></details></div></section>
+    </section>
+    <section id="flow" class="flow wrap" hidden aria-labelledby="flow-title"><div id="flow-content"></div></section>
+  </main>
+  <footer class="wrap footer"><a class="brand small" href="#">отклик.</a><p>Для разговоров, которые важны.</p><span>Локальная демонстрация · 2026</span></footer>
+</body>
+</html>

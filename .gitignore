@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+node_modules/
+
+# Local data and secrets
+.local/
+.env
+.env.*
+!.env.example
+
+# Archive and operating system metadata
+__MACOSX/
+.DS_Store
+._*

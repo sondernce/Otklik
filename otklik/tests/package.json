@@ -1,0 +1,7 @@
+{
+  "name": "otklik-browser-tests",
+  "private": true,
+  "description": "Browser test tools; not required to run the website",
+  "scripts": {"install-browser": "playwright install chromium"},
+  "devDependencies": {"playwright": "1.62.1"}
+}
