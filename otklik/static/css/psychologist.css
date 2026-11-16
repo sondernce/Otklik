@@ -1,0 +1,3 @@
+.calendar-slot.is-booked { background: #edeaf5; border-color: #c9bddc; color: #554673; }
+.calendar-slot.is-booked span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.appointment-card:focus-visible { outline: 2px solid #345da2; outline-offset: 3px; }

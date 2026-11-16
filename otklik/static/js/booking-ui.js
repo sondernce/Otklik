@@ -19,6 +19,10 @@ window.BookingUI = (() => {
       const action = (name,label,extra='') => `<button type="button" class="text-button" data-booking-action="${name}" ${extra}>${label}</button>`;
       let controls = '';
       if (role !== 'admin') {
+        if (item.video_url) controls += `<a class="primary" href="${escape(item.video_url)}" target="_blank" rel="noopener noreferrer">Присоединиться ↗</a>`;
+        else if (item.status === 'confirmed' && role === 'client') controls += '<p class="micro">Психолог пока не добавил ссылку.</p>';
+        if (role === 'psychologist' && item.status === 'confirmed') controls += action('video-link', 'Ссылка на видеовстречу');
+
         controls += `<button type="button" class="text-button" data-chat-appointment="${escape(item.id)}">Переписка</button>`;
         if (role === 'psychologist' && item.status === 'pending' && future) controls += action('confirm','Подтвердить') + action('decline','Отклонить');
         if (active) controls += action('cancel','Отменить встречу');
@@ -28,7 +32,7 @@ window.BookingUI = (() => {
       }
       const events = {rescheduled:'Время изменено',cancelled:'Встреча отменена',change_proposed:'Предложен перенос',change_declined:'Перенос отклонён',change_cancelled:'Перенос отозван'};
       const history = (item.history || []).map(event => `<li>${events[event.action] || escape(event.action)} · ${event.actor === 'client'?'клиент':'психолог'} · ${date(event.at)}${event.to_start?' → '+date(event.to_start):''}</li>`).join('');
-      return `<article class="appointment-card" ${attributes}><h3>${escape(role === 'client' ? item.psychologist_name : item.client_name)}</h3>${role==='admin'?`<p>Психолог: ${escape(item.psychologist_name)}</p>`:''}<p>${date(item.start_at)} · 50 минут</p><p>${escape(item.price)} ₽ · ${statuses[item.status] || escape(item.status)}</p>${item.status==='pending'?`<p class="micro">Ответ психолога до ${date(item.expires_at)}. Без подтверждения время освободится.</p>`:''}${item.status==='cancelled'?`<p class="micro">Отменил ${item.cancelled_by==='client'?'клиент':'психолог'}.</p>`:''}${pending?`<div class="notice"><b>Предложен перенос на ${date(pending.start_at)}</b><p>${pending.offered_by==='client'?'Клиент':'Психолог'} ждёт ответа до ${date(pending.expires_at)}. Пока действует исходная встреча.</p></div>`:''}${controls?`<div class="save-row">${controls}</div>`:''}<div data-change-form></div>${history?`<details><summary>История изменений</summary><ul class="history">${history}</ul></details>`:''}</article>`;
+      return `<article class="appointment-card" ${attributes}><h3>${escape(role === 'client' ? item.psychologist_name : item.client_name)}</h3>${role==='admin'?`<p>Психолог: ${escape(item.psychologist_name)}</p>`:''}<p>${date(item.start_at)} · 50 минут</p><p>${escape(item.price)} ₽ · ${statuses[item.status] || escape(item.status)}</p>${item.status==='pending'?`<p class="micro">Ответ психолога до ${date(item.expires_at)}. Без подтверждения время освободится.</p>`:''}${item.status==='cancelled'?`<p class="micro">Отменил ${item.cancelled_by==='client'?'клиент':'психолог'}.</p>`:''}${pending?`<div class="notice"><b>Предложен перенос на ${date(pending.start_at)}</b><p>${pending.offered_by==='client'?'Клиент':'Психолог'} ждёт ответа до ${date(pending.expires_at)}. Пока действует исходная встреча.</p></div>`:''}${controls?`<div class="save-row">${controls}</div>`:''}${role === 'psychologist' && item.status === 'confirmed' ? `<div data-video-editor hidden><label>Ссылка HTTPS<input type="url" maxlength="2048" value="${escape(item.video_url)}"></label><button type="button" class="primary" data-booking-action="save-video-link">Сохранить ссылку</button></div>` : ''}<div data-change-form></div>${history?`<details><summary>История изменений</summary><ul class="history">${history}</ul></details>`:''}</article>`;
     }).join('');
   }
   function bindActions(container, role, refresh, message) {
@@ -43,6 +47,18 @@ window.BookingUI = (() => {
       button.disabled = true;
       try {
         message('');
+        if (action === 'video-link') {
+          const field = card.querySelector('[data-video-editor]');
+          field.hidden = !field.hidden;
+          if (!field.hidden) field.querySelector('input').focus();
+          return;
+        }
+        if (action === 'save-video-link') {
+          await api(base+'/video-link', {...payload, url:card.querySelector('[data-video-editor] input').value});
+          message('Ссылка обновлена.');
+          await refresh();
+          return;
+        }
         if (action === 'reschedule') {
           const options = await api(base+'/reschedule/options', payload);
           const target = card.querySelector('[data-change-form]');

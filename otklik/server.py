@@ -15,6 +15,9 @@ from urllib.parse import urlsplit, parse_qs
 import booking
 import communications
 import notifications
+import client_profiles
+import video_links
+import web_assets
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get('OTKLIK_DB', ROOT / '.local' / 'otklik.sqlite3'))
@@ -190,7 +193,7 @@ class Handler(BaseHTTPRequestHandler):
         if not token:
             return None
         with connection() as db:
-            row = db.execute('SELECT c.id,c.name,c.email FROM clients c JOIN client_sessions s ON s.client_id=c.id '
+            row = db.execute('SELECT c.id,c.name,c.email,d.age FROM clients c JOIN client_sessions s ON s.client_id=c.id LEFT JOIN client_details d ON d.client_id=c.id '
                              'WHERE s.token_hash=? AND s.expires>?', (hashlib.sha256(token.encode()).hexdigest(), time.time())).fetchone()
             return dict(row) if row else None
 
@@ -247,17 +250,10 @@ class Handler(BaseHTTPRequestHandler):
                 if not private:
                     records = [dict(booking.publication(db, p['id']), slots=future_slots(p, db), auto_approve=p['auto_approve']) for p in records if p['published']]
             return self.send(200, {'profiles': records})
-        files = {'/psychologist': 'psychologist.html', '/psychologist.html': 'psychologist.html', '/psychologist.js': 'psychologist.js', '/form-errors.js': 'form-errors.js', '/': 'index.html', '/index.html': 'index.html', '/documents.html': 'documents.html', '/admin': 'admin.html', '/admin.html': 'admin.html', '/app.js': 'app.js', '/admin.js': 'admin.js', '/styles.css': 'styles.css', '/admin.css': 'admin.css', '/psychologist-dashboard.css': 'psychologist-dashboard.css'}
-        files.update({'/client': 'client.html', '/client.html': 'client.html', '/client.js': 'client.js', '/booking-ui.js': 'booking-ui.js', '/client.css': 'client.css', '/communications-ui.js': 'communications-ui.js'})
-        file = ROOT / files[path] if path in files else None
-        if path.startswith('/assets/'):
-            candidate = (ROOT / path.lstrip('/')).resolve()
-            if candidate.is_relative_to(ROOT / 'assets') and candidate.suffix.lower() in {'.svg', '.png', '.jpeg', '.jpg', '.webp'}:
-                file = candidate
-        if not file or not file.is_file():
+        file = web_assets.resolve(path)
+        if file is None:
             return self.send(404, {'error': 'Страница не найдена.'})
-        mime = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.jpeg': 'image/jpeg', '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp'}[file.suffix]
-        return self.send(200, file.read_bytes(), content_type=mime)
+        return self.send(200, file.read_bytes(), content_type=web_assets.content_type(file))
 
     def do_POST(self):
         origin = self.headers.get('Origin')
@@ -508,6 +504,9 @@ class Handler(BaseHTTPRequestHandler):
                     name = data.get('name')
                     if not isinstance(name, str) or not 2 <= len(name.strip()) <= 100:
                         raise ValueError('Имя должно содержать от 2 до 100 символов.')
+                    age = data.get('age')
+                    if age is not None:
+                        client_profiles.validate_age(age)
                     ident, salt = secrets.token_hex(12), secrets.token_hex(16)
                     try:
                         db.execute('INSERT INTO clients VALUES(?,?,?,?,?)', (ident, email, name.strip(), salt, password_hash(password, salt)))
@@ -518,6 +517,8 @@ class Handler(BaseHTTPRequestHandler):
                     if not row or not hmac.compare_digest(row['hash'], password_hash(password, row['salt'])):
                         return self.send(401, {'error': 'Неверная почта или пароль.'})
                     ident = row['id']
+                if path.endswith('/register') and age is not None:
+                    db.execute('INSERT INTO client_details VALUES (?,?)', (ident, age))
                 token = secrets.token_urlsafe(32)
                 db.execute('DELETE FROM client_sessions WHERE expires<=?', (time.time(),))
                 db.execute('INSERT INTO client_sessions VALUES(?,?,?)', (hashlib.sha256(token.encode()).hexdigest(), ident, time.time()+28800))
@@ -531,6 +532,10 @@ class Handler(BaseHTTPRequestHandler):
             with connection() as db:
                 db.execute('DELETE FROM client_sessions WHERE token_hash=?', (digest,))
             return self.send(200, {'ok': True}, 'otklik_client=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+        if path == '/api/client/settings':
+            with connection() as db:
+                client_profiles.update(db, client['id'], data)
+            return self.send(200, {'ok': True})
         if path == '/api/client/appointments':
             with connection() as db:
                 appointment = booking.create(db, client['id'], data)
@@ -543,7 +548,9 @@ class Handler(BaseHTTPRequestHandler):
         action = path.removeprefix(f'/api/{role}/appointments/')
         functions = {'cancel': booking.cancel, 'reschedule/propose': booking.propose_change, 'reschedule/respond': booking.respond_change}
         with connection() as db:
-            if action == 'reschedule/options':
+            if action == 'video-link' and role == 'psychologist':
+                response = video_links.update(db, actor, data)
+            elif action == 'reschedule/options':
                 response = booking.change_options(db, role, actor, data.get('id'))
             elif action in functions:
                 item = functions[action](db, role, actor, data)

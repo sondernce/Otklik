@@ -169,12 +169,14 @@ class NotificationsTest(unittest.TestCase):
         with server.connection() as db:
             for trigger in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'notify_%'").fetchall():
                 db.execute(f'DROP TRIGGER {trigger[0]}')
+            db.execute('DROP TABLE client_details')
+            db.execute('DROP TABLE appointment_video')
             db.execute('DROP TABLE notifications');db.execute('PRAGMA user_version=3')
         previous=set((server.DB.parent/'backups').glob('*'))
         self.assertEqual(self.notices()[1]['notifications'],[])
         self.assertEqual(len(self.feed(item['id'])[1]['messages']),1)
         with server.connection() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],4)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],booking.SCHEMA_VERSION)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
         backups=set((server.DB.parent/'backups').glob('*'))-previous
         self.assertEqual(len(backups),1)
@@ -210,6 +212,8 @@ class NotificationsTest(unittest.TestCase):
         with server.connection() as db:
             for trigger in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'notify_%'").fetchall():
                 db.execute(f'DROP TRIGGER {trigger[0]}')
+            db.execute('DROP TABLE client_details')
+            db.execute('DROP TABLE appointment_video')
             db.execute('DROP TABLE notifications');db.execute('PRAGMA user_version=3')
         original=notifications.install
         def fail_after_install(db):

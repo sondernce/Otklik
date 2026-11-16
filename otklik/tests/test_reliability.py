@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 import booking
+import database
 import server
 import test_changes
 
@@ -149,7 +150,7 @@ class MigrationRecoveryTest(unittest.TestCase):
                 db.execute('CREATE TABLE profiles(id TEXT PRIMARY KEY,data TEXT NOT NULL)')
                 db.execute('INSERT INTO profiles VALUES(?,?)', ('old', json.dumps(profile)))
                 db.commit()
-            with patch.object(booking, 'publish', side_effect=RuntimeError('simulated migration failure')):
+            with patch.object(database, 'publish', side_effect=RuntimeError('simulated migration failure')):
                 with self.assertRaises(RuntimeError):
                     booking.connect(path)
             with closing(sqlite3.connect(path)) as db:

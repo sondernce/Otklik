@@ -182,6 +182,8 @@ class CommunicationsTest(unittest.TestCase):
                 db.execute(f'DROP TRIGGER {trigger[0]}')
             for table in ('notifications','support_messages','support_tickets','appointment_messages'):
                 db.execute(f'DROP TABLE {table}')
+            db.execute('DROP TABLE client_details')
+            db.execute('DROP TABLE appointment_video')
             db.execute('PRAGMA user_version=2')
         self.assertEqual(self.feed(item['id'])[1]['messages'],[])
         self.assertEqual(self.appointments()[0]['id'],item['id'])

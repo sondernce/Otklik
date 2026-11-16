@@ -95,6 +95,7 @@ test('questionnaire → registration → booking → confirmation, including mob
   await f.page.locator('[data-time="17:30"]').click(); await f.page.locator('#confirm').click();
   await f.page.waitForURL('**/client#book');
   await f.page.locator('#client-name').fill('Тестовый клиент');
+  await f.page.locator('#client-age').fill('30');
   await f.page.locator('#client-email').fill(f.email); await f.page.locator('#client-password').fill('test-client-password');
   await f.page.locator('#client-auth-submit').click(); await f.page.locator('#book').waitFor({state:'visible'});
   assert.equal(await f.page.evaluate(() => JSON.parse(sessionStorage.getItem('otklik-flow-answers')).topic), 'anxiety');
@@ -103,14 +104,31 @@ test('questionnaire → registration → booking → confirmation, including mob
   await f.psyPage.goto(origin+'/psychologist');
   await f.psyPage.getByRole('button',{name:'Подтвердить',exact:true}).click();
   await f.psyPage.getByRole('button',{name:'Перенести',exact:true}).waitFor();
-  await f.page.reload(); await f.page.locator(`[data-appointment="${item.id}"]`).getByText(/Подтверждена/).waitFor();
+  const weekContains = await f.psyPage.evaluate(startAt => {
+    const meetingDay = new Intl.DateTimeFormat('en-CA', {timeZone:'Europe/Moscow', year:'numeric', month:'2-digit', day:'2-digit'}).format(new Date(startAt));
+    return !!document.querySelector(`[data-cell-date="${meetingDay}"]`);
+  }, item.start_at);
+  if (!weekContains) await f.psyPage.locator('#week-next').click();
+  await f.psyPage.locator(`[data-booking-id="${item.id}"]`).click();
+  const meetingCard = f.psyPage.locator(`[data-appointment="${item.id}"]`);
+  assert.equal(await meetingCard.evaluate(card => document.activeElement === card), true);
+  await meetingCard.getByRole('button', {name:'Ссылка на видеовстречу'}).click();
+  await meetingCard.getByLabel('Ссылка HTTPS').fill('https://example.test/meeting');
+  await meetingCard.getByRole('button', {name:'Сохранить ссылку'}).click();
+  await meetingCard.getByRole('link', {name:/Присоединиться/}).waitFor();
+
+  await f.page.reload(); await f.page.locator('[data-client-tab=meetings]').click(); await f.page.locator(`[data-appointment="${item.id}"]`).getByText(/Подтверждена/).waitFor();
+  assert.equal(await f.page.getByRole('link',{name:/Присоединиться/}).getAttribute('href'),'https://example.test/meeting');
+  await f.page.locator('[data-client-tab=settings]').click();
+  assert.equal(await f.page.locator('#client-settings input[name=age]').inputValue(),'30');
+  await f.page.locator('[data-client-tab=overview]').click();
   await f.page.setViewportSize({width:390,height:844});
   assert.ok(await f.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Mobile horizontal overflow');
 });
 
 test('both parties can transfer and cancel; drafts do not replace approved profiles', async t => {
   const f = await fixture(t), item = await confirmed(f);
-  await f.page.goto(origin+'/client'); await f.page.getByRole('button',{name:'Перенести',exact:true}).click();
+  await f.page.goto(origin+'/client'); await f.page.locator('[data-client-tab=meetings]').click(); await f.page.getByRole('button',{name:'Перенести',exact:true}).click();
   await f.page.locator('[data-new-time]').selectOption(f.slots[1]);
   await f.page.getByRole('button',{name:'Предложить время',exact:true}).click();
   await f.page.getByText('Предложение отправлено. До ответа действует исходная встреча.').waitFor();
@@ -175,7 +193,7 @@ test('expired login preserves selected time and asks for authentication', async 
 test('untrusted profile text is displayed as text, including repeat booking', async t => {
   const name = '<img src=x onerror="window.injected=1">';
   const f = await fixture(t,{name}); await confirmed(f);
-  await f.page.goto(origin+'/client'); assert.equal(await f.page.locator('.appointment-card h3').innerText(),name);
+  await f.page.goto(origin+'/client'); await f.page.locator('[data-client-tab=meetings]').click(); assert.equal(await f.page.locator('.appointment-card h3').innerText(),name);
   await f.page.getByRole('link',{name:'Записаться ещё раз',exact:true}).click();
   await f.page.locator('#flow-title').waitFor(); assert.equal(await f.page.locator('#flow-title').innerText(),name);
   assert.equal(await f.page.locator('img[onerror]').count(),0);
@@ -184,7 +202,7 @@ test('untrusted profile text is displayed as text, including repeat booking', as
 
 test('private messages refresh without losing a draft and disappear on logout', async t => {
   const f=await fixture(t),item=await confirmed(f);
-  await f.page.goto(origin+'/client');await f.page.locator(`[data-chat-appointment="${item.id}"]`).click();
+  await f.page.goto(origin+'/client'); await f.page.locator('[data-client-tab=meetings]').click();await f.page.locator(`[data-chat-appointment="${item.id}"]`).click();
   const chat=f.page.locator('#client-chat'),body='<img src=x onerror="window.injected=1">\nВопрос о встрече';
   await chat.locator('[data-message-body]').fill(body);await chat.getByRole('button',{name:'Отправить',exact:true}).click();
   await chat.locator('[data-message-text]').getByText('Вопрос о встрече',{exact:false}).waitFor();
@@ -196,7 +214,7 @@ test('private messages refresh without losing a draft and disappear on logout', 
   await peer.locator('[data-message-body]').fill('Да, встреча состоится.');await peer.getByRole('button',{name:'Отправить',exact:true}).click();
   await chat.getByText('Да, встреча состоится.',{exact:true}).waitFor();
   assert.equal(await chat.locator('[data-message-body]').inputValue(),'Ещё не отправленный текст');
-  await f.page.reload();await f.page.locator(`[data-chat-appointment="${item.id}"]`).click();
+  await f.page.reload(); await f.page.locator('[data-client-tab=meetings]').click();await f.page.locator(`[data-chat-appointment="${item.id}"]`).click();
   await chat.getByText('Да, встреча состоится.',{exact:true}).waitFor();
   assert.equal(await chat.locator('[data-message-text]').count(),2);
   await f.page.setViewportSize({width:390,height:844});
@@ -208,7 +226,7 @@ test('private messages refresh without losing a draft and disappear on logout', 
 
 test('client and psychologist support tickets stay separate; admin can answer and close', async t => {
   const f=await fixture(t);
-  await f.page.goto(origin+'/client');const support=f.page.locator('#client-support');
+  await f.page.goto(origin+'/client'); await f.page.locator('[data-client-tab=support]').click(); const support=f.page.locator('#client-support');
   await support.getByLabel('Тема обращения').fill('Вопрос о моей записи');
   await support.getByLabel('Что произошло?').fill('Нужна помощь с переносом.');
   await support.getByRole('button',{name:'Создать обращение',exact:true}).click();
@@ -244,7 +262,7 @@ test('client and psychologist support tickets stay separate; admin can answer an
 for(const commitBeforeDrop of [false,true]) {
   test(`message retry after network failure ${commitBeforeDrop?'after commit':'before delivery'} sends once`,async t=>{
     const f=await fixture(t),item=await confirmed(f);
-    await f.page.goto(origin+'/client');await f.page.locator(`[data-chat-appointment="${item.id}"]`).click();
+    await f.page.goto(origin+'/client'); await f.page.locator('[data-client-tab=meetings]').click();await f.page.locator(`[data-chat-appointment="${item.id}"]`).click();
     const chat=f.page.locator('#client-chat'),route=/\/api\/client\/messages(?:\?.*)?$/;
     await chat.locator('[data-message-body]').fill('Сообщение с повторной отправкой');
     await f.page.route(route,async request=>{
