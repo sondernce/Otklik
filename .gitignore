@@ -17,3 +17,7 @@ node_modules/
 __MACOSX/
 .DS_Store
 ._*
+
+# Local monitoring receipts
+*.maintenance.json
+*.maintenance.lock

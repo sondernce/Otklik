@@ -104,7 +104,7 @@ class BackupTest(unittest.TestCase):
                 return 'exists'
         with ThreadPoolExecutor(2) as pool:
             self.assertEqual(sorted(pool.map(create,range(2))),['created','exists'])
-        self.assertEqual(backup.verify(self.output())['schema_version'],6)
+        self.assertEqual(backup.verify(self.output())['schema_version'],database.SCHEMA_VERSION)
         self.assertEqual(list(server.DB.parent.glob('.otklik-snapshot-*')),[])
 
     def test_restore_upgrades_v5_copy_without_modifying_source(self):
@@ -115,7 +115,7 @@ class BackupTest(unittest.TestCase):
             db.execute('DROP INDEX client_session_expiry')
             db.execute('PRAGMA user_version=5')
         restored=self.output('restored.sqlite3')
-        self.assertEqual(backup.snapshot(server.DB,restored,restore=True)['schema_version'],6)
+        self.assertEqual(backup.snapshot(server.DB,restored,restore=True)['schema_version'],database.SCHEMA_VERSION)
         self.assertEqual(backup.verify(server.DB)['schema_version'],5)
         with closing(backup.readonly(restored)) as db:
             self.assertEqual(db.execute('SELECT count(*) FROM clients').fetchone()[0],1)

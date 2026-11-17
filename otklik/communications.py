@@ -1,4 +1,5 @@
 """Private appointment conversations and separate support tickets."""
+import json
 from datetime import datetime, timedelta, timezone
 import secrets
 
@@ -176,6 +177,8 @@ def ticket_status(db, role, actor, data):
         return {'ticket': public_ticket(db, item)}
     if type(data.get('revision')) is not int or data['revision'] != item['revision']:
         raise booking.Conflict('Обращение изменилось. Обновите его и повторите действие.')
+    db.execute("INSERT INTO admin_events(created_at,category,kind,actor,target_kind,target_id,result,details) VALUES(?,?,?,?,?,?,?,?)",
+               (booking.now(), 'admin' if role=='admin' else 'platform', 'support_status', role, 'support', item['id'], 'success', json.dumps({'before':item['status'],'after':data['status']})))
     db.execute('UPDATE support_tickets SET status=?,updated_at=?,revision=revision+1 WHERE id=?',
                (data['status'], booking.now(), item['id']))
     return {'ticket': public_ticket(db, owned_ticket(db, role, actor, item['id']))}

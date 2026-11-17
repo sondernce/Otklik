@@ -463,3 +463,65 @@ for(const committed of [false,true]){
     assert.equal(saved.status,committed?'draft':'pending');
   });
 }
+
+test('admin overview shows real counts, safe audit filters and links to related profiles',async t=>{
+  const f=await fixture(t),page=await admin.newPage();t.after(()=>page.close());
+  await post(admin,'/api/admin/review',{id:f.profile.id,revision:f.profile.revision,action:'hide',note:'PRIVATE-AUDIT-NOTE'});
+  const expected=await get(admin,'/api/admin/overview');
+  await page.goto(origin+'/admin');
+  await page.getByText('Обзор обновлён. Время указано по Москве.',{exact:true}).waitFor();
+  assert.equal(await page.locator('#monitor-users .detail-row').filter({has:page.locator('dt',{hasText:'Всего пользователей'})}).locator('dd').innerText(),String(expected.users.total));
+  assert.match(await page.locator('#monitor-service').innerText(),/Не настроены/);
+  await page.locator('#monitor-category').selectOption('admin');await page.locator('#monitor-kind').selectOption('profile_hidden');
+  await page.locator('#monitor-filter').getByRole('button',{name:'Применить фильтры',exact:true}).click();
+  const event=page.locator('#monitor-events li').filter({has:page.locator(`[data-monitor-id="${f.profile.id}"]`)});
+  await event.getByText('Профиль скрыт',{exact:true}).waitFor();
+  assert.ok(!(await page.locator('#monitor-events').innerText()).includes('PRIVATE-AUDIT-NOTE'));
+  await event.getByRole('button',{name:'Открыть',exact:true}).click();
+  await page.locator('#detail h2').getByText('Тестовый психолог',{exact:true}).waitFor();
+  assert.equal(await page.locator('#status-filter').inputValue(),'all');
+  await page.locator('#decision-note').fill('Несохранённое решение администратора');
+  await page.clock.install();
+  const automatic=page.waitForResponse(response=>response.url().includes('/api/admin/overview?'));
+  await page.clock.runFor(30001);await automatic;
+  assert.equal(await page.locator('#decision-note').inputValue(),'Несохранённое решение администратора');
+  assert.equal(await page.locator('#monitor-category').inputValue(),'admin');
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Admin monitoring must fit mobile');
+  await capture(page,'admin-monitor-mobile.png');
+});
+
+test('admin overview timeout keeps filters and can be manually retried',async t=>{
+  const page=await admin.newPage();t.after(()=>page.close());
+  await page.goto(origin+'/admin');await page.getByText('Обзор обновлён. Время указано по Москве.',{exact:true}).waitFor();
+  await page.clock.install();let release,captured,delivered;
+  const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{captured=resolve;}),done=new Promise(resolve=>{delivered=resolve;});
+  const route='**/api/admin/overview?*';
+  await page.route(route,async request=>{captured();await gate;try{await request.abort('failed');}catch{}finally{delivered();}});
+  try{
+    await page.locator('#monitor-days').selectOption('30');
+    await page.locator('#monitor-period').getByRole('button',{name:'Обновить обзор и журнал',exact:true}).click();
+    await ready;await page.clock.runFor(15001);
+    assert.match(await page.locator('#monitor-message').innerText(),/15 секунд/);
+    assert.equal(await page.locator('#monitor-days').inputValue(),'30');
+  }finally{release();await done;await page.unroute(route);}
+  await page.locator('#monitor-period').getByRole('button',{name:'Обновить обзор и журнал',exact:true}).click();
+  await page.getByText('Обзор обновлён. Время указано по Москве.',{exact:true}).waitFor();
+});
+
+test('late admin monitoring response cannot restore data after logout',async t=>{
+  const isolated=await browser.newContext(),page=await isolated.newPage();t.after(()=>isolated.close());
+  await post(isolated,'/api/login',{password:'test-admin-password'});
+  let release,captured,delivered;
+  const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{captured=resolve;}),done=new Promise(resolve=>{delivered=resolve;});
+  await page.route('**/api/admin/overview?*',async request=>{const response=await request.fetch();captured();await gate;try{await request.fulfill({response});}catch{}finally{delivered();}});
+  try{
+    await page.goto(origin+'/admin');await ready;
+    await page.locator('#logout').click();await page.locator('#auth').waitFor({state:'visible'});
+  }finally{release();await done;}
+  assert.equal(await page.locator('#monitor-users').innerText(),'');
+  assert.equal(await page.locator('#monitor-events').innerText(),'');
+  assert.equal(await page.locator('#monitor-service').innerText(),'');
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  assert.equal(await page.locator('#monitor-users').innerText(),'');
+});

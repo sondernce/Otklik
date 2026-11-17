@@ -22,6 +22,7 @@ import web_assets
 import access
 import database
 import diagnostics
+import admin_monitor
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get('OTKLIK_DB', ROOT / '.local' / 'otklik.sqlite3'))
@@ -170,6 +171,11 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def send(self, code, body, cookie=None, content_type='application/json; charset=utf-8'):
+        if code in (401,403,429):
+            path=urlsplit(self.path).path
+            login=path in ('/api/login','/api/client/login','/api/psychologist/login')
+            if code!=401 or login or path not in ('/api/client/me','/api/psychologist/me','/api/status'):
+                diagnostics.record('security_limited' if code==429 else 'security_login_failed' if login else 'security_denied',request_id=getattr(self,'request_id',None),method=self.command,**self.diagnostic_context())
         raw = json.dumps(body, ensure_ascii=False).encode() if isinstance(body, (dict, list)) else body
         self.send_response(code)
         self.send_header('Content-Type', content_type)
@@ -182,6 +188,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Set-Cookie', cookie)
         self.end_headers()
         self.wfile.write(raw)
+
+    def diagnostic_context(self):
+        path=urlsplit(self.path).path
+        role='client' if path.startswith('/api/client/') else 'psychologist' if path.startswith('/api/psychologist/') else 'admin'
+        operation='login' if path in ('/api/login','/api/client/login','/api/psychologist/login') else 'registration' if path.endswith('/register') else next((part for part in ('appointments','support','notifications','messages','profiles') if part in path.split('/')), 'monitoring' if path in ('/api/admin/overview','/api/admin/events') else 'other')
+        return {'role':role,'operation':operation}
 
     def authorized(self):
         with connection() as db:
@@ -248,6 +260,18 @@ class Handler(BaseHTTPRequestHandler):
                 user = db.execute('SELECT email FROM psychologists WHERE id=?', (owner,)).fetchone()
                 p = owned_profile(db, owner)
             return self.send(200, {'email': user[0], 'profile': p})
+        if path in {'/api/admin/overview','/api/admin/events'}:
+            if not self.authorized():
+                return self.send(401, {'error':'Войдите в кабинет администратора.'})
+            query=parse_qs(urlsplit(self.path).query,keep_blank_values=True)
+            if any(len(values)!=1 for values in query.values()):
+                raise ValueError('Параметр должен быть указан один раз.')
+            params={key:values[0] for key,values in query.items()}
+            log_dir=Path(os.environ.get('OTKLIK_LOG_DIR',DB.parent/'logs'))
+            with connection() as db:
+                db.execute('BEGIN')
+                response=admin_monitor.overview(db,params,DB,log_dir) if path.endswith('/overview') else admin_monitor.journal(db,params,log_dir)
+            return self.send(200,response)
         if path == '/api/status':
             return self.send(200, {'setup': not has_admin(), 'authenticated': bool(self.authorized())})
         if path in {'/api/profiles', '/api/admin/profiles'}:
@@ -490,7 +514,7 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(error,(BrokenPipeError,ConnectionResetError)):
             diagnostics.record('connection_lost',error,self.request_id,self.command)
             return
-        diagnostics.record('http_database_error' if status==503 else 'http_unexpected_error',error,self.request_id,self.command)
+        diagnostics.record('http_database_error' if status==503 else 'http_unexpected_error',error,self.request_id,self.command,**self.diagnostic_context())
         text='Сервис временно недоступен. Попробуйте ещё раз через несколько секунд.' if status==503 else 'Не удалось обработать запрос. Попробуйте ещё раз.'
         try:
             return self.send(status,{'error':text,'request_id':self.request_id})

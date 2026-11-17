@@ -142,7 +142,7 @@ raise SystemExit(1)
             db.execute('PRAGMA user_version=5')
         self.assertEqual(self.request('client','GET','/api/client/me')[1]['client']['id'],client['id'])
         with server.connection() as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],6)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],server.database.SCHEMA_VERSION)
             self.assertEqual(db.execute('PRAGMA foreign_key_check').fetchall(),[])
             self.assertEqual(db.execute('SELECT count(*) FROM admin_sessions').fetchone()[0],0)
         self.assertEqual(self.request('admin','GET','/api/admin/profiles')[0],401)

@@ -11,7 +11,7 @@ from timestamps import instant
 from publications import publish
 
 MIGRATION_LOCK = threading.RLock()
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 
 class UnsupportedSchema(ValueError):
@@ -134,6 +134,10 @@ def migrate(db, path):
             db.execute('CREATE INDEX login_attempt_bucket ON login_attempts(bucket)')
             db.execute('CREATE INDEX login_attempt_expiry ON login_attempts(attempted_at)')
             db.execute('PRAGMA user_version=6')
+        if db.execute('PRAGMA user_version').fetchone()[0] == 6:
+            import admin_monitor
+            admin_monitor.install(db)
+            db.execute('PRAGMA user_version=7')
         db.commit()
     except Exception:
         db.rollback()
