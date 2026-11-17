@@ -360,3 +360,106 @@ test('logout can be retried after the server revokes the session but the respons
   await f.page.locator('#client-auth').waitFor({state:'visible'});
   assert.equal(await f.page.locator('#client-notifications [data-notification-id]').count(),0);
 });
+
+for(const role of ['client','psychologist']){
+  test(`late appointment response cannot repopulate ${role} workspace after switching account`,async t=>{
+    const f=await fixture(t),item=await confirmed(f),page=role==='client'?f.page:f.psyPage;
+    await page.goto(origin+'/'+role);
+    const cards=page.locator(`#${role}-appointments`);
+    await cards.locator(`[data-appointment="${item.id}"]`).waitFor({state:'attached'});
+    let release,captured,delivered,held=false;
+    const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{captured=resolve;}),done=new Promise(resolve=>{delivered=resolve;});
+    await page.route(`**/api/${role}/appointments`,async route=>{
+      if(held||route.request().method()!=='GET'){await route.continue();return;}
+      held=true;const response=await route.fetch();captured();await gate;await route.fulfill({response});delivered();
+    });
+    try{
+      await page.evaluate(role=>{window.pendingAppointmentRefresh=role==='client'?refresh():loadAppointments();},role);await ready;
+      await page.locator(role==='client'?'#client-logout':'#logout').click();
+      await page.locator(role==='client'?'#client-auth':'#auth').waitFor({state:'visible'});
+      const email=`new-${role}-${randomUUID()}@test.invalid`,password='new-account-password';
+      await post(role==='client'?f.client:f.psy,`/api/${role}/register`,{email,password,name:'Другой пользователь'});
+      await page.locator(role==='client'?'#client-login-tab':'#login-tab').click();
+      await page.locator(role==='client'?'#client-email':'#email').fill(email);
+      await page.locator(role==='client'?'#client-password':'#password').fill(password);
+      await page.locator(role==='client'?'#client-auth-submit':'#auth-submit').click();
+      await page.locator(role==='client'?'#client-workspace':'#workspace').waitFor({state:'visible'});
+      release();await done;await page.evaluate(()=>window.pendingAppointmentRefresh);
+      assert.equal(await cards.locator('[data-appointment]').count(),0,'Previous account appointments leaked into the new workspace');
+      if(role==='client')assert.equal(await page.locator('#client-next').innerText(),'Пока нет предстоящих встреч');
+      else assert.equal(await page.locator('#profile-form [name=name]').inputValue(),'');
+    }finally{release();}
+  });
+}
+
+for(const committed of [false,true]){
+  test(`booking timeout ${committed?'after commit':'before delivery'} releases controls and retries once`,async t=>{
+    const f=await fixture(t);await bookingDraft(f);await f.page.clock.install();
+    let release,captured,delivered;
+    const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{captured=resolve;}),done=new Promise(resolve=>{delivered=resolve;});
+    const route='**/api/client/appointments';
+    await f.page.route(route,async request=>{
+      if(request.request().method()!=='POST'){await request.continue();return;}
+      const response=committed?await request.fetch():null;captured();await gate;
+      try{if(response)await request.fulfill({response});else await request.abort('failed');}catch{}finally{delivered();}
+    });
+    try{
+      await f.page.locator('#book').click();await ready;await f.page.clock.runFor(15001);
+      assert.equal(await f.page.locator('#book').isDisabled(),false,'Timed out booking must be retryable');
+      assert.ok(await f.page.evaluate(()=>sessionStorage.getItem('otklik-booking-draft')));
+      assert.equal((await get(f.client,'/api/client/appointments')).appointments.length,committed?1:0);
+    }finally{release();await done;await f.page.unroute(route);}
+    await f.page.locator('#book').click();await f.page.getByText('Заявка отправлена. Психолог ответит').waitFor();
+    assert.equal((await get(f.client,'/api/client/appointments')).appointments.length,1);
+  });
+  test(`reschedule network failure ${committed?'after commit':'before delivery'} preserves chosen time and retry key`,async t=>{
+    const f=await fixture(t),item=await confirmed(f);await f.page.goto(origin+'/client');
+    await f.page.locator('[data-client-tab=meetings]').click();
+    const card=f.page.locator(`[data-appointment="${item.id}"]`);
+    await card.getByRole('button',{name:'Перенести',exact:true}).click();await card.locator('[data-new-time]').selectOption(f.slots[2]);
+    const key=await card.locator('[data-change-form]').getAttribute('data-request-key'),route='**/api/client/appointments/reschedule/propose';
+    await f.page.route(route,async request=>{if(committed)assert.equal((await request.fetch()).status(),200);await request.abort('failed');});
+    await card.getByRole('button',{name:'Предложить время',exact:true}).click();
+    await f.page.waitForFunction(()=>document.getElementById('client-message').textContent.length>0);
+    assert.equal(await card.locator('[data-new-time]').count(),1,'Network error must preserve the reschedule form');
+    assert.equal(await card.locator('[data-new-time]').inputValue(),f.slots[2]);
+    assert.equal(await card.locator('[data-change-form]').getAttribute('data-request-key'),key);
+    await f.page.unroute(route);await card.getByRole('button',{name:'Предложить время',exact:true}).click();
+    await f.page.getByText('Предложение отправлено. До ответа действует исходная встреча.').waitFor();
+    const saved=(await get(f.client,'/api/client/appointments')).appointments[0];
+    assert.equal(saved.change.start_at,f.slots[2]);assert.equal(saved.history.filter(event=>event.action==='change_proposed').length,1);
+  });
+}
+
+for(const committed of [false,true]){
+  test(`profile timeout ${committed?'after commit':'before delivery'} preserves edits and prevents stale overwrite`,async t=>{
+    const f=await fixture(t),page=f.psyPage;
+    await page.goto(origin+'/psychologist#application');
+    await page.locator('#profile-form [name=price]').fill('4200');await page.clock.install();
+    let release,captured,delivered;
+    const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{captured=resolve;}),done=new Promise(resolve=>{delivered=resolve;});
+    const route='**/api/psychologist/profile';
+    await page.route(route,async request=>{
+      const response=committed?await request.fetch():null;captured();await gate;
+      try{if(response)await request.fulfill({response});else await request.abort('failed');}catch{}finally{delivered();}
+    });
+    try{
+      await page.locator('#save').click();await ready;await page.clock.runFor(15001);
+      assert.equal(await page.locator('#save').isDisabled(),false);
+      assert.equal(await page.locator('#profile-form [name=price]').inputValue(),'4200');
+      assert.match(await page.locator('#dashboard-message').innerText(),/15 секунд/);
+      assert.equal((await get(f.psy,'/api/psychologist/me')).profile.price,committed?4200:3000);
+    }finally{release();await done;await page.unroute(route);}
+    const response=page.waitForResponse(r=>r.url().endsWith('/api/psychologist/profile')&&r.request().method()==='POST');
+    await page.locator('#save').click();assert.equal((await response).status(),committed?409:200);
+    if(committed){
+      await page.getByText('Анкета изменилась. Обновите страницу и повторите действие.',{exact:true}).waitFor();
+      assert.equal(await page.locator('#profile-form [name=price]').inputValue(),'4200');
+    }else await page.waitForFunction(()=>document.getElementById('application-status').textContent.includes('Заявка на рассмотрении'));
+    const saved=(await get(f.psy,'/api/psychologist/me')).profile;
+    assert.equal(saved.price,4200);
+    // A successful approved-profile save also submits it for review, a separate revision.
+    assert.equal(saved.revision,f.profile.revision+(committed?1:2));
+    assert.equal(saved.status,committed?'draft':'pending');
+  });
+}

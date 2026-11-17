@@ -9,7 +9,16 @@ const notices=CommunicationUI.mountNotifications(find('client-notifications'),'c
   if(item.kind==='appointment_message'){chat.open(item.target_id,'Переписка по встрече');find('client-chat').scrollIntoView({block:'nearest'});}
   else {const card=find('client-appointments').querySelector(`[data-appointment="${CSS.escape(item.target_id)}"]`);if(!card)throw Error('Встреча не найдена. Обновите кабинет.');card.tabIndex=-1;card.focus();card.scrollIntoView({block:'nearest'});}
 });
-let mode = 'register', user = null, draft = null;
+let mode = 'register', user = null, draft = null, sessionEpoch=0, appointmentLoad=0;
+function currentSession(){const epoch=sessionEpoch;return()=>epoch===sessionEpoch&&user!==null;}
+function clearWorkspace(){
+  user=null;CommunicationUI.reset('client');
+  find('client-appointments').replaceChildren();find('client-settings').reset();find('client-settings').querySelector('button').disabled=false;
+  find('client-settings-message').textContent='';find('client-greeting').textContent='Мои встречи';
+  find('client-next').textContent='Пока нет предстоящих встреч';
+  calendarBookings=[];calendarMonth=null;selectedDay=null;
+  for(const suffix of ['','-large']){find('client-days'+suffix).replaceChildren();find('client-day-details'+suffix).replaceChildren();}
+}
 try {draft = JSON.parse(sessionStorage.getItem('otklik-booking-draft') || 'null');} catch {}
 if (!draft || typeof draft.psychologist_id !== 'string' || !Number.isFinite(Date.parse(draft.start_at)) || typeof draft.request_key !== 'string') draft = null;
 function message(text='') {find('client-message').textContent = text;}
@@ -26,8 +35,11 @@ function switchMode(next) {
   find('client-login-tab').setAttribute('aria-pressed', String(mode === 'login'));
 }
 async function refresh(isCurrent=()=>true) {
-  const data = await ui.api('/api/client/appointments');
-  if(!isCurrent())return;
+  const session=currentSession(),load=++appointmentLoad;
+  if(!session())return;
+  let data;
+  try{data=await ui.api('/api/client/appointments');}catch(error){if(session()&&isCurrent()&&load===appointmentLoad)throw error;return;}
+  if(!session()||!isCurrent()||load!==appointmentLoad)return;
   find('client-appointments').innerHTML = ui.cards(data.appointments, 'client');
   calendarBookings = data.appointments.filter(item => ['pending', 'confirmed'].includes(item.status));
   const upcoming = calendarBookings.filter(item => Date.parse(item.start_at) > Date.now()).sort((a,b) => Date.parse(a.start_at) - Date.parse(b.start_at))[0];
@@ -39,9 +51,11 @@ async function refresh(isCurrent=()=>true) {
   refreshCalendars();
 }
 async function boot() {
+  const epoch=++sessionEpoch;
   find('booking-draft').hidden = !draft;
   if (draft) find('draft-summary').innerHTML = `<h2>${ui.escape(draft.name)}</h2><p>${ui.date(draft.start_at)} · 50 минут</p><p>Стоимость при выборе: ${ui.escape(draft.price)} ₽</p><p>Видеовстреча. Оплата пока не подключена.</p>`;
-  try {user = (await ui.api('/api/client/me')).client;} catch (error) {if (error.status !== 401) {message(error.message); return;} user = null;CommunicationUI.reset('client');}
+  try {const data=await ui.api('/api/client/me');if(epoch!==sessionEpoch)return false;if(user&&user.id!==data.client.id)clearWorkspace();user=data.client;}
+  catch (error) {if(epoch!==sessionEpoch)return false;if (error.status !== 401) {message(error.message); return false;} clearWorkspace();}
   find('client-auth').hidden = !!user;
   find('client-workspace').hidden = !user;
   find('book').hidden = !user || !draft;
@@ -56,36 +70,42 @@ async function boot() {
     calendarMonth = null;
   }
   if (user) {support.start();notices.start();find('client-greeting').textContent = `${user.name}, ваши встречи`; await refresh();}
+  return epoch===sessionEpoch;
 }
 find('client-register-tab').addEventListener('click', () => switchMode('register'));
 find('client-login-tab').addEventListener('click', () => switchMode('login'));
 find('client-auth-form').addEventListener('submit', async event => {
   event.preventDefault();
+  const epoch=++sessionEpoch;
   const button = find('client-auth-submit'); button.disabled = true; message();
   try {
     await ui.api(`/api/client/${mode}`, {name:find('client-name').value,email:find('client-email').value,password:find('client-password').value,...(mode === 'register' ? {age:Number(find('client-age').value)} : {})});
+    if(epoch!==sessionEpoch)return;
     find('client-password').value = '';
     CommunicationUI.reset('client');
-    await boot();
+    if(!await boot())return;
     if (draft) {message('Вы вошли. Проверьте время и отправьте заявку.'); find('book').focus();}
   } catch (error) {message(error.message);} finally {button.disabled = false;}
 });
 find('book').addEventListener('click', async () => {
   if (!draft) return;
+  const isCurrent=currentSession();
   const button = find('book'); button.disabled = true; message();
   try {
     const data = await ui.api('/api/client/appointments', draft);
+    if(!isCurrent())return;
     sessionStorage.removeItem('otklik-booking-draft');
     sessionStorage.removeItem('otklik-flow-answers');
     draft = null;
-    await boot();
+    if(!await boot())return;
     showView('meetings');
     message(data.appointment.status === 'confirmed' ? 'Встреча подтверждена. Она появилась в вашем кабинете.' : data.appointment.status === 'pending' ? 'Заявка отправлена. Психолог ответит в течение 12 часов, но не позднее начала встречи.' : 'Заявка уже была отправлена. Её текущий статус показан ниже.');
-  } catch (error) {message(error.message); if (error.status === 401) await boot();} finally {button.disabled = false;}
+  } catch (error) {if(!isCurrent())return;message(error.message); if (error.status === 401) await boot();} finally {button.disabled = false;}
 });
 find('discard-draft').addEventListener('click', () => {sessionStorage.removeItem('otklik-booking-draft'); location.href = '/';});
 find('client-logout').addEventListener('click', async () => {
-  try {await ui.api('/api/client/logout', {}); CommunicationUI.reset('client'); await boot(); message('Вы вышли из кабинета.');} catch (error) {message(error.message);}
+  const epoch=++sessionEpoch;
+  try {await ui.api('/api/client/logout', {});if(epoch!==sessionEpoch)return;clearWorkspace();if(await boot())message('Вы вышли из кабинета.');} catch (error) {if(epoch===sessionEpoch)message(error.message);}
 });
 find('client-refresh').addEventListener('click', () => {message(); refresh().catch(error => message(error.message));});
 function showView(view) {
@@ -103,16 +123,18 @@ document.querySelectorAll('[data-client-tab], [data-client-open]').forEach(butto
 find('client-settings').addEventListener('submit', async event => {
   event.preventDefault();
   const form = event.currentTarget;
+  const isCurrent=currentSession();
   const button = form.querySelector('button');
   button.disabled = true;
   try {
     await ui.api('/api/client/settings', {name:form.elements.name.value, age:Number(form.elements.age.value)});
+    if(!isCurrent())return;
     find('client-greeting').textContent = form.elements.name.value.trim() + ', ваши встречи';
     find('client-settings-message').textContent = 'Настройки сохранены.';
   } catch (error) {
-    find('client-settings-message').textContent = error.message;
+    if(isCurrent())find('client-settings-message').textContent = error.message;
   } finally {
-    button.disabled = false;
+    if(isCurrent())button.disabled = false;
   }
 });
 
@@ -202,4 +224,4 @@ for (const suffix of ['', '-large']) {
 
 boot().catch(error => message(error.message));
 
-ui.bindActions(find('client-appointments'),'client',refresh,message);
+ui.bindActions(find('client-appointments'),'client',refresh,message,currentSession);

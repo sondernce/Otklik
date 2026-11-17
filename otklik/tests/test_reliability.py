@@ -96,7 +96,7 @@ class ReliabilityTest(unittest.TestCase):
 
         with closing(sqlite3.connect(server.DB)) as lock:
             lock.execute('BEGIN IMMEDIATE')
-            with patch.object(server, 'connection', short_timeout), patch.object(server.logging, 'exception'):
+            with patch.object(server, 'connection', short_timeout), patch.object(server.diagnostics, 'record'):
                 self.assertEqual(self.book(p)[0], 503)
             lock.rollback()
         self.assertEqual(self.appointments(), [])
@@ -107,7 +107,7 @@ class ReliabilityTest(unittest.TestCase):
         _, item = self.meeting()
         self.propose('client', item)
         current = self.current()
-        with patch.object(booking, 'audit', side_effect=RuntimeError('simulated storage failure')), patch.object(server.logging, 'exception'):
+        with patch.object(booking, 'audit', side_effect=RuntimeError('simulated storage failure')), patch.object(server.diagnostics, 'record'):
             self.assertEqual(self.action('psy', current, 'reschedule/respond', 'psychologist',
                                         change_id=current['change']['id'], action='accept')[0], 500)
         restored = self.current()

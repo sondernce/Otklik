@@ -149,7 +149,7 @@ raise SystemExit(1)
         self.assertEqual(self.request('admin','POST','/api/login',{'password':'test-admin-password'})[0],200)
 
     def test_failed_session_write_rolls_back_registration(self):
-        with self.assertLogs(level='ERROR'), patch.object(access,'issue',side_effect=RuntimeError('simulated storage failure')):
+        with patch.object(server.diagnostics,'record'), patch.object(access,'issue',side_effect=RuntimeError('simulated storage failure')):
             self.assertEqual(self.request('new','POST','/api/psychologist/register',{'email':'new@test.invalid','password':'test-psychologist-password'})[0],500)
         with server.connection() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM psychologists').fetchone()[0],0)

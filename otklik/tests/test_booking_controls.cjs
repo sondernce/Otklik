@@ -1,0 +1,17 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const vm=require('node:vm');
+const context=vm.createContext({window:{},Intl,Date});
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../static/js/booking-ui.js'),'utf8'),context);
+const meeting={id:'meeting',profile_id:'profile',revision:0,price:3000,status:'confirmed',psychologist_name:'Психолог',client_name:'Клиент',start_at:'2000-01-01T12:00:00+00:00',history:[]};
+const past=context.window.BookingUI.cards([meeting],'psychologist');
+assert.doesNotMatch(past,/data-booking-action="video-link"/,'Past meetings must not offer an editor rejected by the server');
+assert.doesNotMatch(past,/data-video-editor/);
+assert.match(past,/data-chat-appointment=/,'Chat history remains available');
+const future=context.window.BookingUI.cards([{...meeting,start_at:'2099-01-01T12:00:00+00:00'}],'psychologist');
+assert.match(future,/data-booking-action="video-link"/);
+assert.match(future,/data-booking-action="cancel"/);
+assert.match(future,/data-booking-action="reschedule"/);
+console.log('Appointment controls match the existing server time restrictions.');

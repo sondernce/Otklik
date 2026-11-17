@@ -148,7 +148,7 @@ class CommunicationsTest(unittest.TestCase):
 
     def test_ticket_creation_is_atomic_and_idempotent(self):
         self.client()
-        with patch.object(communications,'public_ticket',side_effect=RuntimeError('simulated failure')),patch.object(server.logging,'exception'):
+        with patch.object(communications,'public_ticket',side_effect=RuntimeError('simulated failure')),patch.object(server.diagnostics,'record'):
             self.assertEqual(self.ticket()[0],500)
         self.assertEqual(self.request('client','GET','/api/client/support/tickets')[1]['tickets'],[])
         with ThreadPoolExecutor(2) as pool:

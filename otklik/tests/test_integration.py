@@ -29,7 +29,7 @@ class IntegrationTest(unittest.TestCase):
             self.assertEqual(code, 200)
             for asset in re.findall(rb'(?:href|src)="(/static/[^\"]+)"', html):
                 self.assertEqual(self.request('anonymous', 'GET', asset.decode())[0], 200, asset)
-        for path in ('/database.py', '/video_links.py', '/templates/client.html', '/static/../server.py', '/static/js/../../server.py'):
+        for path in ('/database.py', '/video_links.py', '/diagnostics.py', '/logs/otklik.log', '/.local/logs/otklik.log', '/templates/client.html', '/static/../server.py', '/static/js/../../server.py'):
             self.assertEqual(self.request('anonymous', 'GET', path)[0], 404)
 
     def test_video_link_rejects_stale_editor(self):

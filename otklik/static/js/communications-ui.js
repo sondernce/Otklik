@@ -3,14 +3,7 @@ window.CommunicationUI = (() => {
   const widgets = [];
   const date = value => BookingUI.date(value);
   async function api(path, data) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    try {
-      const response = await fetch(path, {signal:controller.signal, ...(data === undefined ? {} : {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)})});
-      const body = await response.json();
-      if (!response.ok) {const error = Error(body.error || 'Не удалось выполнить действие.'); error.status=response.status; throw error;}
-      return body;
-    } finally {clearTimeout(timeout);}
+    return HttpAPI.request(path,data);
   }
   function errorText(error, fallback) {return error.status ? error.message : fallback;}
 

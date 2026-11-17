@@ -13,9 +13,7 @@ const slotClock=value=>{const parts=new Intl.DateTimeFormat('en-GB',{timeZone:'E
 async function loadProfiles(){
  catalogError=false;
  try{
-  const response=await fetch('/api/profiles');
-  if(!response.ok)throw Error('catalog');
-  const data=await response.json();
+  const data=await HttpAPI.request('/api/profiles');
   people=data.profiles.length?data.profiles.map(p=>({...p,local:true,name:safe(p.name),bio:safe(p.bio),approach:safe(p.approach),education:safe(p.education||''),display_name:p.name,initials:safe(p.initials),slots:p.slots.filter(s=>new Date(s)>new Date()),times:[...new Set(p.slots.filter(s=>new Date(s)>new Date()).map(s=>slotClock(s)))]})):[];
  }catch{catalogError=true;people=[];}
 }

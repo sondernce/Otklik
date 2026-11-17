@@ -64,7 +64,9 @@ def create(db, client_id, data):
     expire(db)
     previous = db.execute('SELECT * FROM appointments WHERE client_id=? AND request_key=?', (client_id, key)).fetchone()
     if previous:
-        if previous['profile_id'] != profile_id or previous['start_at'] != start:
+        first_move = db.execute("SELECT from_start FROM appointment_events WHERE appointment_id=? AND action='rescheduled' ORDER BY id LIMIT 1", (previous['id'],)).fetchone()
+        requested_start = first_move['from_start'] if first_move else previous['start_at']
+        if previous['profile_id'] != profile_id or requested_start != start:
             raise Conflict('Этот запрос уже использован для другой встречи.')
         return dict(previous)
     row = db.execute('SELECT data FROM profiles WHERE id=?', (profile_id,)).fetchone()

@@ -3,14 +3,15 @@ import base64
 import hashlib
 import hmac
 import json
-import logging
+import errno
 import os
 from pathlib import Path
 import secrets
 import sqlite3
 import time
+import sys
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer as BaseHTTPServer
 from urllib.parse import urlsplit, parse_qs
 import booking
 import communications
@@ -19,10 +20,12 @@ import client_profiles
 import video_links
 import web_assets
 import access
+import database
+import diagnostics
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get('OTKLIK_DB', ROOT / '.local' / 'otklik.sqlite3'))
-PORT = int(os.environ.get('OTKLIK_PORT', '4173'))
+PORT = 4173
 TOPICS = {'anxiety', 'relationships', 'self', 'burnout'}
 
 
@@ -156,6 +159,11 @@ def owned_profile(db, owner):
     return None
 
 
+class ThreadingHTTPServer(BaseHTTPServer):
+    def handle_error(self, request, client_address):
+        diagnostics.record('server_thread_error',sys.exc_info()[1])
+
+
 class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *_):
@@ -193,6 +201,7 @@ class Handler(BaseHTTPRequestHandler):
             return dict(row) if row else None
 
     def do_GET(self):
+        self.request_id=secrets.token_hex(16)
         if not self.trusted_host():
             return self.send(403, {'error': 'Недопустимый адрес сайта.'})
         try:
@@ -201,11 +210,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(429, {'error': str(e)})
         except booking.Conflict as e:
             return self.send(409, {'error': str(e)})
+        except database.UnsupportedSchema as error:
+            return self.failed_request(error,503)
         except (ValueError, TypeError) as e:
             return self.send(400, {'error': str(e) or 'Проверьте запрос.'})
-        except sqlite3.OperationalError:
-            logging.exception('Database error during GET')
-            return self.send(503, {'error': 'Сервис занят. Попробуйте ещё раз через несколько секунд.'})
+        except (sqlite3.Error, OSError) as error:
+            return self.failed_request(error,503)
+        except Exception as error:
+            return self.failed_request(error,500)
 
     def get_request(self):
         path = urlsplit(self.path).path
@@ -253,6 +265,7 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(200, file.read_bytes(), content_type=web_assets.content_type(file))
 
     def do_POST(self):
+        self.request_id=secrets.token_hex(16)
         if not self.trusted_host():
             return self.send(403, {'error': 'Недопустимый адрес сайта.'})
         origin = self.headers.get('Origin')
@@ -454,9 +467,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(429, {'error': str(e)})
         except booking.Conflict as e:
             return self.send(409, {'error': str(e)})
-        except sqlite3.OperationalError:
-            logging.exception('Database error during POST')
-            return self.send(503, {'error': 'Сервис занят. Повторите запрос через несколько секунд.'})
+        except (sqlite3.Error, OSError, database.UnsupportedSchema) as error:
+            return self.failed_request(error,503)
         except (ValueError, TypeError) as e:
             text = str(e) or 'Проверьте данные.'
             field = None
@@ -471,9 +483,19 @@ class Handler(BaseHTTPRequestHandler):
                         field = key
                         break
             return self.send(400, {'error': text, 'field': field})
-        except Exception:
-            logging.exception('Unexpected request error')
-            return self.send(500, {'error': 'Не удалось обработать запрос. Попробуйте ещё раз.'})
+        except Exception as error:
+            return self.failed_request(error,500)
+
+    def failed_request(self, error, status):
+        if isinstance(error,(BrokenPipeError,ConnectionResetError)):
+            diagnostics.record('connection_lost',error,self.request_id,self.command)
+            return
+        diagnostics.record('http_database_error' if status==503 else 'http_unexpected_error',error,self.request_id,self.command)
+        text='Сервис временно недоступен. Попробуйте ещё раз через несколько секунд.' if status==503 else 'Не удалось обработать запрос. Попробуйте ещё раз.'
+        try:
+            return self.send(status,{'error':text,'request_id':self.request_id})
+        except (BrokenPipeError,ConnectionResetError):
+            pass
 
     def client_request(self, path, data):
         if path in {'/api/client/register', '/api/client/login'}:
@@ -589,7 +611,62 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(200, response)
 
 
+def main():
+    global PORT, DB
+    value=os.environ.get('OTKLIK_PORT','4173').strip()
+    if len(value)>5 or not value.isascii() or not value.isdecimal() or not 1<=int(value)<=65535:
+        print('Ошибка запуска: OTKLIK_PORT должен быть целым числом от 1 до 65535.',file=sys.stderr)
+        return 1
+    PORT=int(value)
+    DB=Path(os.environ.get('OTKLIK_DB',ROOT/'.local'/'otklik.sqlite3'))
+    directory=Path(os.environ.get('OTKLIK_LOG_DIR',DB.parent/'logs'))
+    try:
+        for name in ('otklik.log','otklik.log.1','otklik.log.2'):
+            path=directory/name
+            if DB.resolve()==path.resolve() or (DB.exists() and path.exists() and os.path.samefile(DB,path)):
+                raise ValueError('Database and log paths overlap')
+        diagnostics.configure(directory)
+    except (OSError,ValueError):
+        print('Ошибка запуска: не удалось открыть журнал. Проверьте OTKLIK_LOG_DIR и права доступа.',file=sys.stderr)
+        return 1
+    http=None
+    try:
+        try:
+            http=ThreadingHTTPServer(('127.0.0.1',PORT),Handler)
+        except OSError as error:
+            diagnostics.record('startup_failed',error)
+            text=f'Порт {PORT} уже занят. Остановите другой сервер или измените OTKLIK_PORT.' if error.errno==errno.EADDRINUSE else 'Не удалось открыть локальный порт. Проверьте OTKLIK_PORT и права доступа.'
+            print('Ошибка запуска: '+text,file=sys.stderr)
+            return 1
+        try:
+            connection().close()
+        except database.UnsupportedSchema as error:
+            diagnostics.record('startup_failed',error)
+            print('Ошибка запуска: версия базы новее поддерживаемой. Обновите приложение или выберите совместимую копию через OTKLIK_DB.',file=sys.stderr)
+            return 1
+        except sqlite3.DatabaseError as error:
+            diagnostics.record('startup_failed',error)
+            print('Ошибка запуска: не удалось прочитать или обновить базу. Проверьте файл OTKLIK_DB, его целостность и отсутствие блокировки.',file=sys.stderr)
+            return 1
+        except OSError as error:
+            diagnostics.record('startup_failed',error)
+            print('Ошибка запуска: не удалось открыть базу. Проверьте путь OTKLIK_DB и права на папку.',file=sys.stderr)
+            return 1
+        diagnostics.record('startup_ready')
+        print(f'Отклик: http://127.0.0.1:{PORT}/ | Кабинет: http://127.0.0.1:{PORT}/admin',flush=True)
+        http.serve_forever()
+    except KeyboardInterrupt:
+        diagnostics.record('startup_stopped')
+    except Exception as error:
+        diagnostics.record('startup_failed',error)
+        print('Ошибка запуска: не удалось запустить сервис. Подробности без личных данных сохранены в журнале.',file=sys.stderr)
+        return 1
+    finally:
+        if http is not None:
+            http.server_close()
+        diagnostics.close()
+    return 0
+
+
 if __name__ == '__main__':
-    connection().close()
-    print(f'Отклик: http://127.0.0.1:{PORT}/ | Кабинет: http://127.0.0.1:{PORT}/admin', flush=True)
-    ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()
+    raise SystemExit(main())

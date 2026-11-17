@@ -89,6 +89,18 @@ class ChangesTest(unittest.TestCase):
         self.assertIsNone(self.current()['change'])
         self.assertEqual(len(self.current()['history']),1)
 
+    def test_original_booking_retry_remains_idempotent_after_multiple_transfers(self):
+        p,item=self.meeting(auto=True)
+        self.assertEqual(self.propose('client',item)[0],200)
+        self.assertEqual(self.propose('client',self.current(),key='second-transfer-retry',target=2)[0],200)
+        code,replay=self.book(p)
+        self.assertEqual(code,200,replay)
+        self.assertEqual(replay['appointment']['id'],item['id'])
+        self.assertEqual(replay['appointment']['start_at'],self.times[2])
+        wrong=self.request('client','POST','/api/client/appointments',{'psychologist_id':p['id'],'start_at':self.times[2],'request_key':'one-booking-request'})
+        self.assertEqual(wrong[0],409)
+        self.assertEqual(len(self.appointments()),1)
+
     def test_expired_declined_and_withdrawn_proposals_preserve_original(self):
         p,item=self.meeting()
         self.propose('client',item)

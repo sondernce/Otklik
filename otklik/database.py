@@ -13,6 +13,10 @@ from publications import publish
 MIGRATION_LOCK = threading.RLock()
 SCHEMA_VERSION = 6
 
+
+class UnsupportedSchema(ValueError):
+    pass
+
 class Connection(sqlite3.Connection):
     def __exit__(self, *args):
         try:
@@ -34,6 +38,8 @@ def connect(path):
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')
     try:
+        if db.execute('PRAGMA user_version').fetchone()[0] > SCHEMA_VERSION:
+            raise UnsupportedSchema('Версия базы новее поддерживаемой. Используйте подходящую версию приложения или проверенную копию базы.')
         if db.execute('PRAGMA user_version').fetchone()[0] < SCHEMA_VERSION:
             with MIGRATION_LOCK:
                 migrate(db, path)
