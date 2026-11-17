@@ -4,6 +4,7 @@
 
 - [План доработки проекта](development-plan.md).
 - [Архитектура и структура файлов](docs/architecture.md).
+- [Резервные копии и восстановление](docs/backup-and-restore.md).
 - [Сравнение и объединение загруженной версии](docs/integration-report.md).
 - [Описание проекта](project-description.md).
 - [Исходники приложения](otklik/).

@@ -14,9 +14,6 @@ class WorkflowTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         server.DB = Path(self.temp.name) / 'test.sqlite3'
-        server.SESSIONS.clear()
-        server.PSY_SESSIONS.clear()
-        server.Handler.attempts.clear()
         self.http = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)
         server.PORT = self.http.server_port
         threading.Thread(target=self.http.serve_forever, daemon=True).start()

@@ -18,12 +18,11 @@ import notifications
 import client_profiles
 import video_links
 import web_assets
+import access
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get('OTKLIK_DB', ROOT / '.local' / 'otklik.sqlite3'))
 PORT = int(os.environ.get('OTKLIK_PORT', '4173'))
-SESSIONS = {}
-PSY_SESSIONS = {}
 TOPICS = {'anxiety', 'relationships', 'self', 'burnout'}
 
 
@@ -158,7 +157,6 @@ def owned_profile(db, owner):
 
 
 class Handler(BaseHTTPRequestHandler):
-    attempts = {}
 
     def log_message(self, *_):
         pass
@@ -178,18 +176,15 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def authorized(self):
-        cookies = dict(x.strip().split('=', 1) for x in self.headers.get('Cookie', '').split(';') if '=' in x)
-        session = SESSIONS.get(cookies.get('otklik_admin'))
-        return session and session > time.time()
+        with connection() as db:
+            return access.identify(db, 'admin', access.token(self.headers.get('Cookie', ''), 'admin')) is not None
 
     def psychologist(self):
-        cookies = dict(x.strip().split('=', 1) for x in self.headers.get('Cookie', '').split(';') if '=' in x)
-        session = PSY_SESSIONS.get(cookies.get('otklik_psy'))
-        return session['user'] if session and session['expires'] > time.time() else None
+        with connection() as db:
+            return access.identify(db, 'psychologist', access.token(self.headers.get('Cookie', ''), 'psychologist'))
 
     def client(self):
-        cookies = dict(x.strip().split('=', 1) for x in self.headers.get('Cookie', '').split(';') if '=' in x)
-        token = cookies.get('otklik_client', '')
+        token = access.token(self.headers.get('Cookie', ''), 'client')
         if not token:
             return None
         with connection() as db:
@@ -198,6 +193,8 @@ class Handler(BaseHTTPRequestHandler):
             return dict(row) if row else None
 
     def do_GET(self):
+        if not self.trusted_host():
+            return self.send(403, {'error': 'Недопустимый адрес сайта.'})
         try:
             return self.get_request()
         except communications.RateLimit as e:
@@ -256,8 +253,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.send(200, file.read_bytes(), content_type=web_assets.content_type(file))
 
     def do_POST(self):
+        if not self.trusted_host():
+            return self.send(403, {'error': 'Недопустимый адрес сайта.'})
         origin = self.headers.get('Origin')
-        if origin not in {f'http://127.0.0.1:{PORT}', f'http://localhost:{PORT}'}:
+        if origin not in {f'http://127.0.0.1:{PORT}', f'http://localhost:{PORT}'} or self.headers.get('Sec-Fetch-Site') == 'cross-site':
             return self.send(403, {'error': 'Запрос разрешён только из локального приложения.'})
         if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
             return self.send(415, {'error': 'Ожидается JSON.'})
@@ -269,6 +268,9 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError('Неверный запрос.')
             path = urlsplit(self.path).path
+            logout_roles = {'/api/logout': 'admin', '/api/psychologist/logout': 'psychologist', '/api/client/logout': 'client'}
+            if path in logout_roles:
+                return self.logout(logout_roles[path])
             if self.is_communication_path(path):
                 return self.communication_request(path, data, write=True)
             if path.startswith('/api/client/'):
@@ -298,10 +300,7 @@ class Handler(BaseHTTPRequestHandler):
                         response = {'auto_approve': data['auto_approve']}
                 return self.send(200, response)
             if path in {'/api/setup', '/api/login'}:
-                recent = [x for x in self.attempts.get('local', []) if x > time.time() - 60]
-                if len(recent) >= 8:
-                    return self.send(429, {'error': 'Слишком много попыток. Подождите минуту.'})
-                self.attempts['local'] = recent + [time.time()]
+                self.check_login_limit('admin')
                 password = data.get('password', '')
                 if not isinstance(password, str) or not 8 <= len(password) <= 200:
                     raise ValueError('Пароль должен содержать от 8 до 200 символов.')
@@ -319,14 +318,10 @@ class Handler(BaseHTTPRequestHandler):
                         saved = json.loads(row[0])
                         if not hmac.compare_digest(saved['hash'], password_hash(password, saved['salt'])):
                             return self.send(401, {'error': 'Неверный пароль.'})
-                token = secrets.token_urlsafe(32)
-                SESSIONS[token] = time.time() + 28800
-                return self.send(200, {'ok': True}, f'otklik_admin={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800')
+                    token = access.issue(db, 'admin', previous=access.token(self.headers.get('Cookie', ''), 'admin'))
+                return self.send(200, {'ok': True}, access.cookie('admin', token))
             if path in {'/api/psychologist/register', '/api/psychologist/login'}:
-                recent = [x for x in self.attempts.get('psy', []) if x > time.time() - 60]
-                if len(recent) >= 12:
-                    return self.send(429, {'error': 'Слишком много попыток. Подождите минуту.'})
-                self.attempts['psy'] = recent + [time.time()]
+                self.check_login_limit('psychologist', data.get('email'), path.endswith('/register'))
                 email, password = data.get('email', ''), data.get('password', '')
                 if not isinstance(email, str) or not isinstance(password, str):
                     raise ValueError('Проверьте почту и пароль.')
@@ -350,18 +345,14 @@ class Handler(BaseHTTPRequestHandler):
                         if not row or not hmac.compare_digest(row[2], password_hash(password, row[1])):
                             return self.send(401, {'error': 'Неверная почта или пароль.'})
                         owner = row[0]
-                token = secrets.token_urlsafe(32)
-                PSY_SESSIONS[token] = dict(user=owner, expires=time.time()+28800)
-                return self.send(200, {'ok': True}, f'otklik_psy={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800')
+                    token = access.issue(db, 'psychologist', owner, access.token(self.headers.get('Cookie', ''), 'psychologist'))
+                return self.send(200, {'ok': True}, access.cookie('psychologist', token))
             if path.startswith('/api/psychologist/'):
                 owner = self.psychologist()
                 if not owner:
                     return self.send(401, {'error': 'Войдите в кабинет психолога.'})
                 if path.endswith('/logout'):
-                    for item in self.headers.get('Cookie', '').split(';'):
-                        if item.strip().startswith('otklik_psy='):
-                            PSY_SESSIONS.pop(item.strip().split('=',1)[1], None)
-                    return self.send(200, {'ok': True}, 'otklik_psy=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+                    return self.logout('psychologist')
                 if path not in {'/api/psychologist/profile', '/api/psychologist/submit', '/api/psychologist/schedule'}:
                     return self.send(404, {'error': 'Маршрут не найден.'})
                 with connection() as db:
@@ -410,10 +401,7 @@ class Handler(BaseHTTPRequestHandler):
             if not self.authorized():
                 return self.send(401, {'error': 'Войдите в кабинет.'})
             if path == '/api/logout':
-                for item in self.headers.get('Cookie', '').split(';'):
-                    if item.strip().startswith('otklik_admin='):
-                        SESSIONS.pop(item.strip().split('=', 1)[1], None)
-                return self.send(200, {'ok': True}, 'otklik_admin=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+                return self.logout('admin')
             if path in {'/api/admin/profiles', '/api/admin/review'}:
                 with connection() as db:
                     db.execute('BEGIN IMMEDIATE')
@@ -462,7 +450,7 @@ class Handler(BaseHTTPRequestHandler):
                     save_record(db, p)
                 return self.send(200, {'profile': decorate(p)})
             return self.send(404, {'error': 'Маршрут не найден.'})
-        except communications.RateLimit as e:
+        except (communications.RateLimit, access.Limited) as e:
             return self.send(429, {'error': str(e)})
         except booking.Conflict as e:
             return self.send(409, {'error': str(e)})
@@ -489,10 +477,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def client_request(self, path, data):
         if path in {'/api/client/register', '/api/client/login'}:
-            recent = [stamp for stamp in self.attempts.get('client', []) if stamp > time.time() - 60]
-            if len(recent) >= 12:
-                return self.send(429, {'error': 'Слишком много попыток. Подождите минуту.'})
-            self.attempts['client'] = recent + [time.time()]
+            self.check_login_limit('client', data.get('email'), path.endswith('/register'))
             email, password = data.get('email'), data.get('password')
             if not isinstance(email, str) or len(email) > 200 or email.count('@') != 1 or '.' not in email.split('@')[-1] or any(c.isspace() for c in email):
                 raise ValueError('Введите корректную электронную почту.')
@@ -519,19 +504,13 @@ class Handler(BaseHTTPRequestHandler):
                     ident = row['id']
                 if path.endswith('/register') and age is not None:
                     db.execute('INSERT INTO client_details VALUES (?,?)', (ident, age))
-                token = secrets.token_urlsafe(32)
-                db.execute('DELETE FROM client_sessions WHERE expires<=?', (time.time(),))
-                db.execute('INSERT INTO client_sessions VALUES(?,?,?)', (hashlib.sha256(token.encode()).hexdigest(), ident, time.time()+28800))
-            return self.send(200, {'ok': True}, f'otklik_client={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800')
+                token = access.issue(db, 'client', ident, access.token(self.headers.get('Cookie', ''), 'client'))
+            return self.send(200, {'ok': True}, access.cookie('client', token))
         client = self.client()
         if not client:
             return self.send(401, {'error': 'Войдите в кабинет клиента.'})
         if path == '/api/client/logout':
-            cookies = dict(x.strip().split('=', 1) for x in self.headers.get('Cookie', '').split(';') if '=' in x)
-            digest = hashlib.sha256(cookies.get('otklik_client', '').encode()).hexdigest()
-            with connection() as db:
-                db.execute('DELETE FROM client_sessions WHERE token_hash=?', (digest,))
-            return self.send(200, {'ok': True}, 'otklik_client=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
+            return self.logout('client')
         if path == '/api/client/settings':
             with connection() as db:
                 client_profiles.update(db, client['id'], data)
@@ -543,6 +522,18 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/client/appointments/'):
             return self.appointment_action('client', client['id'], path, data)
         return self.send(404, {'error': 'Маршрут не найден.'})
+
+    def trusted_host(self):
+        return self.headers.get_all('Host') in ([f'127.0.0.1:{PORT}'], [f'localhost:{PORT}'])
+
+    def check_login_limit(self, role, identity='', registration=False):
+        with connection() as db:
+            access.throttle(db, role, self.client_address[0], identity, registration)
+
+    def logout(self, role):
+        with connection() as db:
+            access.revoke(db, role, access.token(self.headers.get('Cookie', ''), role))
+        return self.send(200, {'ok': True}, access.cookie(role, clear=True))
 
     def appointment_action(self, role, actor, path, data):
         action = path.removeprefix(f'/api/{role}/appointments/')

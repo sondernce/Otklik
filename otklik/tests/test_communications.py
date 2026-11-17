@@ -182,6 +182,9 @@ class CommunicationsTest(unittest.TestCase):
                 db.execute(f'DROP TRIGGER {trigger[0]}')
             for table in ('notifications','support_messages','support_tickets','appointment_messages'):
                 db.execute(f'DROP TABLE {table}')
+            for table in ('admin_sessions','psychologist_sessions','login_attempts'):
+                db.execute(f'DROP TABLE {table}')
+            db.execute('DROP INDEX client_session_expiry')
             db.execute('DROP TABLE client_details')
             db.execute('DROP TABLE appointment_video')
             db.execute('PRAGMA user_version=2')

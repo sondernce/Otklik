@@ -343,3 +343,20 @@ test('late notification response cannot restore private data after logout',async
   await f.page.waitForFunction(()=>document.querySelector('#client-notifications [data-unread-count]').textContent==='0');
   assert.equal(await f.page.locator('#client-notifications [data-notification-id]').count(),0);
 });
+
+test('logout can be retried after the server revokes the session but the response is lost',async t=>{
+  const f=await fixture(t);await confirmed(f);
+  await f.page.goto(origin+'/client');
+  const route='**/api/client/logout';
+  await f.page.route(route,async request=>{
+    const response=await request.fetch();assert.equal(response.status(),200);
+    await request.abort('failed');
+  });
+  await f.page.locator('#client-logout').click();
+  await f.page.waitForFunction(()=>document.getElementById('client-message').textContent.length>0);
+  assert.equal((await f.client.request.get(origin+'/api/client/me')).status(),401);
+  await f.page.unroute(route);
+  await f.page.locator('#client-logout').click();
+  await f.page.locator('#client-auth').waitFor({state:'visible'});
+  assert.equal(await f.page.locator('#client-notifications [data-notification-id]').count(),0);
+});

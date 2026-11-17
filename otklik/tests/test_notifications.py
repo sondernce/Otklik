@@ -83,7 +83,6 @@ class NotificationsTest(unittest.TestCase):
         self.assertEqual(latest['kind'],'appointment_message')
         self.assertIsNone(latest['read_at'])
         self.read({'ids':[latest['id']]})
-        server.SESSIONS.clear();server.PSY_SESSIONS.clear()
         self.assertEqual(self.notices()[1]['unread_count'],0)
         self.assertTrue(all(item['read_at'] for item in self.notices()[1]['notifications']))
 
@@ -169,6 +168,9 @@ class NotificationsTest(unittest.TestCase):
         with server.connection() as db:
             for trigger in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'notify_%'").fetchall():
                 db.execute(f'DROP TRIGGER {trigger[0]}')
+            for table in ('admin_sessions','psychologist_sessions','login_attempts'):
+                db.execute(f'DROP TABLE {table}')
+            db.execute('DROP INDEX client_session_expiry')
             db.execute('DROP TABLE client_details')
             db.execute('DROP TABLE appointment_video')
             db.execute('DROP TABLE notifications');db.execute('PRAGMA user_version=3')
@@ -183,6 +185,7 @@ class NotificationsTest(unittest.TestCase):
         with closing(sqlite3.connect(next(iter(backups)))) as db:
             self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],3)
             self.assertEqual(db.execute('SELECT count(*) FROM appointment_messages').fetchone()[0],1)
+        self.assertEqual(self.request('psy','POST','/api/psychologist/login',{'email':'psy@test.invalid','password':'test-psychologist-password'})[0],200)
         self.send(item['id'],'psy','psychologist',key='post-migration-message')
         self.assertEqual(self.notices()[1]['unread_by_kind'],{'appointment_message':1})
 
@@ -212,6 +215,9 @@ class NotificationsTest(unittest.TestCase):
         with server.connection() as db:
             for trigger in db.execute("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'notify_%'").fetchall():
                 db.execute(f'DROP TRIGGER {trigger[0]}')
+            for table in ('admin_sessions','psychologist_sessions','login_attempts'):
+                db.execute(f'DROP TABLE {table}')
+            db.execute('DROP INDEX client_session_expiry')
             db.execute('DROP TABLE client_details')
             db.execute('DROP TABLE appointment_video')
             db.execute('DROP TABLE notifications');db.execute('PRAGMA user_version=3')

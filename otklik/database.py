@@ -2,6 +2,7 @@
 from contextlib import closing
 from datetime import timedelta
 import json
+import os
 from pathlib import Path
 import secrets
 import sqlite3
@@ -10,7 +11,7 @@ from timestamps import instant
 from publications import publish
 
 MIGRATION_LOCK = threading.RLock()
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 class Connection(sqlite3.Connection):
     def __exit__(self, *args):
@@ -22,7 +23,13 @@ class Connection(sqlite3.Connection):
 
 def connect(path):
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        pass
+    else:
+        os.close(descriptor)
     db = sqlite3.connect(path, timeout=5, factory=Connection)
     db.row_factory = sqlite3.Row
     db.execute('PRAGMA foreign_keys=ON')
@@ -43,6 +50,8 @@ def migrate(db, path):
         folder = path.parent / 'backups'
         folder.mkdir(exist_ok=True)
         backup = folder / (path.name + '.before-booking-' + secrets.token_hex(6))
+        descriptor = os.open(backup, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        os.close(descriptor)
         with closing(sqlite3.connect(backup)) as destination:
             db.backup(destination)
     db.execute('BEGIN IMMEDIATE')
@@ -109,6 +118,16 @@ def migrate(db, path):
             db.execute('CREATE TABLE client_details (client_id TEXT PRIMARY KEY REFERENCES clients(id), age INTEGER NOT NULL CHECK(age BETWEEN 1 AND 120))')
             db.execute('CREATE TABLE appointment_video (appointment_id TEXT PRIMARY KEY REFERENCES appointments(id), url TEXT NOT NULL)')
             db.execute('PRAGMA user_version=5')
+        if db.execute('PRAGMA user_version').fetchone()[0] == 5:
+            db.execute('CREATE TABLE psychologist_sessions (token_hash TEXT PRIMARY KEY, psychologist_id TEXT NOT NULL REFERENCES psychologists(id), expires REAL NOT NULL)')
+            db.execute('CREATE TABLE admin_sessions (token_hash TEXT PRIMARY KEY, expires REAL NOT NULL)')
+            db.execute('CREATE INDEX psychologist_session_expiry ON psychologist_sessions(expires)')
+            db.execute('CREATE INDEX admin_session_expiry ON admin_sessions(expires)')
+            db.execute('CREATE INDEX client_session_expiry ON client_sessions(expires)')
+            db.execute('CREATE TABLE login_attempts (bucket TEXT NOT NULL, attempted_at REAL NOT NULL)')
+            db.execute('CREATE INDEX login_attempt_bucket ON login_attempts(bucket)')
+            db.execute('CREATE INDEX login_attempt_expiry ON login_attempts(attempted_at)')
+            db.execute('PRAGMA user_version=6')
         db.commit()
     except Exception:
         db.rollback()

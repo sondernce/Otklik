@@ -63,8 +63,6 @@ class BookingTest(unittest.TestCase):
         self.assertEqual(self.request('psy', 'POST', '/api/psychologist/booking-settings', {'auto_approve': True})[0], 200)
         self.assertEqual(self.book(p)[1]['appointment']['status'], 'confirmed')
         # Client sessions, appointments and preferences are stored in SQLite.
-        server.SESSIONS.clear()
-        server.PSY_SESSIONS.clear()
         self.assertEqual(self.request('client', 'GET', '/api/client/me')[0], 200)
         self.assertEqual(self.appointments()[0]['status'], 'confirmed')
         self.assertEqual(self.public(), [])
