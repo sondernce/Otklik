@@ -41,6 +41,22 @@ class MonitorTest(unittest.TestCase):
         diagnostics.close()
         test_changes.ChangesTest.tearDown(self)
 
+    def test_equal_previous_period_and_exclusive_boundaries(self):
+        with server.connection() as db:
+            db.executemany('INSERT INTO account_registry VALUES(?,?,?)', [
+                ('client', 'comparison-old', '2026-10-31T21:00:00+00:00'),
+                ('client', 'comparison-previous', '2026-11-01T21:00:00+00:00'),
+                ('client', 'comparison-current', '2026-11-07T21:00:00+00:00'),
+                ('client', 'comparison-after', '2026-11-14T21:00:00+00:00'),
+            ])
+            result = admin_monitor.overview(db, {'from':'2026-11-08', 'to':'2026-11-14'}, server.DB, server.DB.parent/'logs')
+        comparison = result['comparison']
+        self.assertEqual(comparison['period'], {
+            'from':'2026-10-31T21:00:00+00:00', 'to':'2026-11-07T21:00:00+00:00'})
+        self.assertEqual(comparison['registrations']['client'], 2)
+        self.assertEqual(result['users']['registrations']['client'], 1)
+        self.assertEqual(comparison['meetings']['created'], 0)
+
     def overview(self):
         code,body=self.request('admin','GET','/api/admin/overview')
         self.assertEqual(code,200,body)

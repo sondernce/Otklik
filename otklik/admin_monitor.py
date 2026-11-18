@@ -107,6 +107,8 @@ def journal(db, params, log_dir):
 
 def overview(db, params, database_path, log_dir):
     start,end=period(params)
+    previous_end = start
+    previous_start = (datetime.fromisoformat(start) - (datetime.fromisoformat(end) - datetime.fromisoformat(start))).isoformat()
     stamp=datetime.now(timezone.utc);now=stamp.isoformat()
     count=lambda sql,args=():db.execute(sql,args).fetchone()[0]
     clients=count('SELECT count(*) FROM clients');psychologists=count('SELECT count(*) FROM psychologists')
@@ -173,7 +175,21 @@ def overview(db, params, database_path, log_dir):
     warn(not logs['available'],'logs','Журнал ошибок недоступен или ещё не создан.')
     warn(logs['partial'],'logs_partial','Часть журнала повреждена или недоступна; сводка ошибок неполная.')
     warn(overdue>0,'expired_pending','Есть заявки с истёкшим сроком: они уже не удерживают время и будут закрыты при обработке записей.')
-    return {'period':{'from':start,'to':end},'users':{'total':clients+psychologists,'clients':clients,'psychologists':psychologists,'registrations':registrations,'legacy_unknown_date':count('SELECT count(*) FROM account_registry WHERE registered_at IS NULL')},
+    previous_registrations = {
+        role: count('SELECT count(*) FROM account_registry WHERE role=? AND registered_at>=? AND registered_at<?',
+                    (role, previous_start, previous_end))
+        for role in ('client', 'psychologist')
+    }
+    previous_meetings = {
+        'created': count('SELECT count(*) FROM appointments WHERE created_at>=? AND created_at<?', (previous_start, previous_end)),
+        'cancellations': count("SELECT count(*) FROM admin_events WHERE kind='cancelled' AND created_at>=? AND created_at<?", (previous_start, previous_end)),
+        'reschedules': count("SELECT count(*) FROM admin_events WHERE kind='rescheduled' AND created_at>=? AND created_at<?", (previous_start, previous_end)),
+    }
+    previous_errors = sum(e['category'] == 'errors' and previous_start <= e['created_at'] < previous_end for e in logs['events'])
+    comparison = {'period': {'from': previous_start, 'to': previous_end},
+                  'registrations': previous_registrations, 'meetings': previous_meetings,
+                  'errors': previous_errors if logs['available'] and not logs['partial'] else None}
+    return {'comparison': comparison, 'period':{'from':start,'to':end},'users':{'total':clients+psychologists,'clients':clients,'psychologists':psychologists,'registrations':registrations,'legacy_unknown_date':count('SELECT count(*) FROM account_registry WHERE registered_at IS NULL')},
             'profiles':profiles,'meetings':meetings,'tasks':tasks,'cancellations':cancellations,
             'errors':{'count':len(errors),'groups':sorted(groups.values(),key=lambda x:x['count'],reverse=True)[:20],'latest':errors[:10],'available':logs['available'],'partial':logs['partial'],'scope':'Учитываются только сохранившиеся файлы журнала, до 3 МиБ.'},
             'service':{'version':VERSION,'schema_version':db.execute('PRAGMA user_version').fetchone()[0],'uptime_seconds':int(time.monotonic()-STARTED),'database_available':True,'database_bytes':Path(database_path).stat().st_size,'disk_free_bytes':free},
