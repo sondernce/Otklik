@@ -15,7 +15,7 @@ function clearWorkspace(){
   user=null;CommunicationUI.reset('client');
   find('client-appointments').replaceChildren();find('client-settings').reset();find('client-settings').querySelector('button').disabled=false;
   find('client-settings-message').textContent='';find('client-greeting').textContent='Мои встречи';
-  find('client-next').textContent='Пока нет предстоящих встреч';
+  find('client-next').replaceChildren();find('client-specialist').replaceChildren();find('client-specialist').hidden=true;
   calendarBookings=[];calendarMonth=null;selectedDay=null;
   for(const suffix of ['','-large']){find('client-days'+suffix).replaceChildren();find('client-day-details'+suffix).replaceChildren();}
 }
@@ -24,6 +24,7 @@ if (!draft || typeof draft.psychologist_id !== 'string' || !Number.isFinite(Date
 function message(text='') {find('client-message').textContent = text;}
 function switchMode(next) {
   mode = next;
+  FormErrors.clear(find('client-auth-form'));
   find('client-name-label').hidden = mode === 'login';
   find('client-age-label').hidden = mode === 'login';
   find('client-age').required = mode === 'register';
@@ -43,7 +44,7 @@ async function refresh(isCurrent=()=>true) {
   find('client-appointments').innerHTML = ui.cards(data.appointments, 'client');
   calendarBookings = data.appointments.filter(item => ['pending', 'confirmed'].includes(item.status));
   const upcoming = calendarBookings.filter(item => Date.parse(item.start_at) > Date.now()).sort((a,b) => Date.parse(a.start_at) - Date.parse(b.start_at))[0];
-  find('client-next').textContent = upcoming ? upcoming.psychologist_name + ' · ' + ui.date(upcoming.start_at) : 'Пока нет предстоящих встреч';
+  ClientHome.render(upcoming,user);
   if (!calendarMonth) {
     selectedDay = moscowDate(upcoming ? new Date(upcoming.start_at) : new Date());
     calendarMonth = new Date(selectedDay.slice(0, 7) + '-01T12:00:00Z');
@@ -53,6 +54,7 @@ async function refresh(isCurrent=()=>true) {
 async function boot() {
   const epoch=++sessionEpoch;
   find('booking-draft').hidden = !draft;
+  document.body.classList.toggle('has-booking-draft',!!draft);
   if (draft) find('draft-summary').innerHTML = `<h2>${ui.escape(draft.name)}</h2><p>${ui.date(draft.start_at)} · 50 минут</p><p>Стоимость при выборе: ${ui.escape(draft.price)} ₽</p><p>Видеовстреча. Оплата пока не подключена.</p>`;
   try {const data=await ui.api('/api/client/me');if(epoch!==sessionEpoch)return false;if(user&&user.id!==data.client.id)clearWorkspace();user=data.client;}
   catch (error) {if(epoch!==sessionEpoch)return false;if (error.status !== 401) {message(error.message); return false;} clearWorkspace();}
@@ -69,13 +71,19 @@ async function boot() {
     find('client-auth').before(find('client-message'), find('booking-draft'));
     calendarMonth = null;
   }
-  if (user) {support.start();notices.start();find('client-greeting').textContent = `${user.name}, ваши встречи`; await refresh();}
+  if (user) {showView(['overview','meetings','settings','support'].includes(location.hash.slice(1))?location.hash.slice(1):'overview',false);support.start();notices.start();find('client-greeting').textContent = `${user.name}, добрый день`; await refresh();}
   return epoch===sessionEpoch;
 }
 find('client-register-tab').addEventListener('click', () => switchMode('register'));
 find('client-login-tab').addEventListener('click', () => switchMode('login'));
 find('client-auth-form').addEventListener('submit', async event => {
   event.preventDefault();
+  const form=event.currentTarget;FormErrors.clear(form);const errors={};
+  if(mode==='register'&&find('client-name').value.trim().length<2)errors['#client-name']='Укажите имя от 2 символов.';
+  if(mode==='register'&&(!find('client-age').value||!Number.isInteger(Number(find('client-age').value))||Number(find('client-age').value)<1||Number(find('client-age').value)>120))errors['#client-age']='Укажите возраст от 1 до 120 лет.';
+  if(!find('client-email').value||!find('client-email').validity.valid)errors['#client-email']='Укажите корректную электронную почту.';
+  if(find('client-password').value.length<8)errors['#client-password']='Пароль должен содержать от 8 символов.';
+  if(FormErrors.show(errors))return;
   const epoch=++sessionEpoch;
   const button = find('client-auth-submit'); button.disabled = true; message();
   try {
@@ -85,7 +93,7 @@ find('client-auth-form').addEventListener('submit', async event => {
     CommunicationUI.reset('client');
     if(!await boot())return;
     if (draft) {message('Вы вошли. Проверьте время и отправьте заявку.'); find('book').focus();}
-  } catch (error) {message(error.message);} finally {button.disabled = false;}
+  } catch (error) {if(epoch===sessionEpoch){const fields={name:'#client-name',age:'#client-age',email:'#client-email',password:'#client-password'};if(error.field&&fields[error.field])FormErrors.show({[fields[error.field]]:error.message});else if(error.status===409)FormErrors.show({'#client-email':error.message});else if(error.status===401)FormErrors.show({'#client-email':'Проверьте почту.','#client-password':error.message});else message(error.message);}} finally {button.disabled = false;}
 });
 find('book').addEventListener('click', async () => {
   if (!draft) return;
@@ -108,7 +116,9 @@ find('client-logout').addEventListener('click', async () => {
   try {await ui.api('/api/client/logout', {});if(epoch!==sessionEpoch)return;clearWorkspace();if(await boot())message('Вы вышли из кабинета.');} catch (error) {if(epoch===sessionEpoch)message(error.message);}
 });
 find('client-refresh').addEventListener('click', () => {message(); refresh().catch(error => message(error.message));});
-function showView(view) {
+function showView(view,updateURL=true) {
+  if(!['overview','meetings','settings','support'].includes(view))view='overview';
+  if(updateURL&&location.hash!=='#'+view)history.pushState(null,'','#'+view);
   document.querySelectorAll('[data-client-view]').forEach(section => section.hidden = section.dataset.clientView !== view);
   document.querySelectorAll('[data-client-tab]').forEach(button => {
     const selected = button.dataset.clientTab === view;
@@ -172,13 +182,13 @@ function renderDayDetails(suffix) {
   for (const meeting of meetings) {
     const entry = document.createElement('div');
     entry.className = 'client-calendar-meeting';
-    entry.textContent = meeting.psychologist_name + ' · ' + ui.date(meeting.start_at);
+    entry.innerHTML=`<div class="cal-appointment"><div class="cal-appointment-time"><strong>${ClientHome.clock(meeting.start_at)}</strong><span>50 минут</span></div><div><strong>${ui.escape(meeting.psychologist_name)}</strong><span class="cal-status ${meeting.status==='confirmed'?'confirmed':''}">${meeting.status==='confirmed'?'Подтверждена':'Ждём подтверждения'}</span></div></div><button type="button" class="primary cal-open-meeting" data-home-appointment="${ui.escape(meeting.id)}">Открыть встречу</button>`;
     detail.append(entry);
   }
 }
 
 function renderCalendar(suffix) {
-  find('client-month' + suffix).textContent = monthLabel.format(calendarMonth);
+  find('client-month' + suffix).textContent = monthLabel.format(calendarMonth).replace(' г.','');
   const grid = find('client-days' + suffix);
   grid.replaceChildren();
   const today = moscowDate(new Date());
@@ -194,6 +204,9 @@ function renderCalendar(suffix) {
     button.dataset.date = key;
     button.textContent = date.getUTCDate();
     button.classList.toggle('has-meeting', hasMeeting);
+    button.classList.toggle('weekend',[0,6].includes(date.getUTCDay()));
+    button.tabIndex=(key===selectedDay||(!selectedDay.startsWith(calendarMonth.toISOString().slice(0,7))&&date.getUTCDate()===1))?0:-1;
+    button.addEventListener('keydown',event=>{const offsets={ArrowLeft:-1,ArrowRight:1,ArrowUp:-7,ArrowDown:7};if(!(event.key in offsets))return;event.preventDefault();const next=new Date(key+'T12:00:00Z');next.setUTCDate(next.getUTCDate()+offsets[event.key]);selectedDay=next.toISOString().slice(0,10);calendarMonth=new Date(selectedDay.slice(0,7)+'-01T12:00:00Z');refreshCalendars();find('client-days'+suffix).querySelector('[data-date="'+selectedDay+'"]').focus();});
     if (key === today) button.setAttribute('aria-current', 'date');
     button.setAttribute('aria-pressed', String(key === selectedDay));
     button.setAttribute('aria-label', dayLabel.format(date) + (hasMeeting ? ', есть встреча' : ''));
@@ -225,3 +238,8 @@ for (const suffix of ['', '-large']) {
 boot().catch(error => message(error.message));
 
 ui.bindActions(find('client-appointments'),'client',refresh,message,currentSession);
+
+window.addEventListener('popstate',()=>showView(location.hash.slice(1),false));
+window.addEventListener('hashchange',()=>showView(location.hash.slice(1),false));
+find('month-today').addEventListener('click',()=>{selectedDay=moscowDate(new Date());calendarMonth=new Date(selectedDay.slice(0,7)+'-01T12:00:00Z');refreshCalendars();});
+find('client-workspace').addEventListener('click',event=>{const button=event.target.closest('[data-home-appointment]');if(!button)return;const id=button.dataset.homeAppointment;showView('meetings');if(button.hasAttribute('data-home-chat')){chat.open(id,'Переписка по встрече');find('client-chat').scrollIntoView({block:'nearest'});}else{const card=find('client-appointments').querySelector('[data-appointment="'+CSS.escape(id)+'"]');if(card){card.tabIndex=-1;card.focus();card.scrollIntoView({block:'nearest'});}}});

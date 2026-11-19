@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex"><title>Мои встречи · Отклик</title>
   <link rel="stylesheet" href="/static/css/styles.css"><link rel="stylesheet" href="/static/css/admin.css"><link rel="stylesheet" href="/static/css/dashboard.css"><link rel="stylesheet" href="/static/css/client.css">
-  <script defer src="/static/js/http.js"></script><script defer src="/static/js/booking-ui.js"></script><script defer src="/static/js/communications-ui.js"></script><script defer src="/static/js/client.js"></script>
+  <script defer src="/static/js/http.js"></script><script defer src="/static/js/booking-ui.js"></script><script defer src="/static/js/communications-ui.js"></script><script defer src="/static/js/form-errors.js"></script><script defer src="/static/js/client-home.js"></script><script defer src="/static/js/client.js"></script>
 </head>
 <body class="client-page">
   <header class="header wrap"><a class="brand" href="/">отклик</a><span>Личный кабинет</span><a class="text-button" href="/">К подбору</a></header>
@@ -21,7 +21,7 @@
       <p class="eyebrow">Продолжить запись</p><h2 id="client-auth-title">Создать кабинет</h2>
       <p class="subtext">Выбранное время и ответы анкеты сохранятся при входе. Пароль не сохраняется в браузере приложением.</p>
       <div class="auth-tabs"><button id="client-register-tab" class="text-button" type="button" aria-pressed="true">Регистрация</button><button id="client-login-tab" class="text-button" type="button" aria-pressed="false">Войти</button></div>
-      <form id="client-auth-form">
+      <form id="client-auth-form" novalidate>
         <label id="client-name-label">Как к вам обращаться<input id="client-name" autocomplete="name" minlength="2" maxlength="100" required></label>
         <label id="client-age-label">Возраст<input id="client-age" type="number" min="1" max="120" step="1" required></label><label>Электронная почта<input id="client-email" type="email" autocomplete="email" maxlength="200" required></label>
         <label>Пароль · от 8 символов<input id="client-password" type="password" autocomplete="new-password" minlength="8" maxlength="200" required></label>
@@ -43,27 +43,27 @@
         <header class="dashboard-topbar"><span>Кабинет клиента</span><a href="/">Перейти на сайт ↗</a></header>
         <div id="workspace-messages"></div>
         <section id="client-notifications" class="panel" aria-label="Уведомления"></section>
-        <section data-client-view="overview">
-          <div class="dashboard-heading"><h1 id="client-greeting">Мои встречи</h1></div>
-          <div class="client-overview-grid">
-            <article class="panel client-next"><h2>Ближайшая встреча</h2><p id="client-next"></p><button class="text-button" data-client-open="meetings">Открыть мои встречи</button><section class="client-calendar" aria-labelledby="client-month">
-        <div class="client-calendar-head">
-          <h3 id="client-month" aria-live="polite"></h3>
-          <div class="week-controls">
-            <button type="button" id="month-prev" aria-label="Предыдущий месяц">‹</button>
-
-            <button type="button" id="month-next" aria-label="Следующий месяц">›</button>
-          </div>
-        </div>
-        <div class="client-calendar-grid">
-          <span>Пн</span><span>Вт</span><span>Ср</span><span>Чт</span><span>Пт</span><span>Сб</span><span>Вс</span>
-          <div id="client-days"></div>
-        </div>
-        <p class="calendar-key"><span>Сегодня</span><span>Есть встреча</span></p>
-        <div id="client-day-details" aria-live="polite"></div>
-      </section></article>
-            <article class="panel client-discover"><h2>Найдите своего психолога</h2><p>Ответьте на несколько вопросов и выберите удобное время.</p><a class="primary" href="/">Перейти к подбору ↗</a></article>
-          </div>
+        <section data-client-view="overview" class="client-home-v2">
+          <div class="home-heading"><div><p class="eyebrow">Ваше личное пространство</p><h1 id="client-greeting">Добрый день</h1><p class="subtext">Всё для вашей следующей встречи — здесь.</p></div><span id="home-today" class="today-label"></span></div>
+          <div class="home-columns"><div class="home-main-column">
+            <section id="client-specialist" class="meeting-specialist-frame" hidden></section>
+            <section id="client-next" class="meeting-appointment-frame" aria-live="polite"></section>
+            <section class="preparation-frame"><div class="section-line"><h2>Перед первым разговором</h2><span>Без спешки</span></div><p class="subtext">Не нужно готовить правильные слова. Начните с того, что сейчас важно.</p>
+              <details><summary>Как проходит первая встреча</summary><p>Вы знакомитесь с психологом, рассказываете о том, что вас привело, и обсуждаете ожидания. Можно задавать вопросы и говорить, если что-то некомфортно.</p></details>
+              <details><summary>Что понадобится для онлайн-встречи</summary><p>Найдите тихое место, подготовьте наушники и проверьте интернет. Ссылка для подключения появится в карточке встречи, когда психолог её добавит.</p></details>
+              <details><summary>Если планы изменятся</summary><p>Откройте «Мои встречи», выберите запись и посмотрите доступные действия. До согласования переноса действует исходное время.</p></details>
+            </section>
+          </div><aside class="home-side-column">
+            <section class="pleasant-calendar" aria-labelledby="client-calendar-title">
+              <div class="cal-heading"><div><p class="eyebrow">Ваше расписание</p><h2 id="client-calendar-title">Календарь встреч</h2></div><button id="month-today" class="cal-today" type="button">Сегодня</button></div>
+              <div class="cal-month-navigation"><button id="month-prev" type="button" aria-label="Предыдущий месяц">Назад</button><h3 id="client-month" aria-live="polite"></h3><button id="month-next" type="button" aria-label="Следующий месяц">Далее</button></div>
+              <div class="pleasant-month"><span class="cal-weekday">Пн</span><span class="cal-weekday">Вт</span><span class="cal-weekday">Ср</span><span class="cal-weekday">Чт</span><span class="cal-weekday">Пт</span><span class="cal-weekday weekend">Сб</span><span class="cal-weekday weekend">Вс</span><div id="client-days"></div></div>
+              <div class="cal-legend"><span>Сегодня — обводка</span><span>Встреча — точка</span><span>МСК</span></div>
+              <div id="client-day-details" class="cal-day-detail" aria-live="polite"></div><button class="text-button cal-all" data-client-open="meetings" type="button">Все мои встречи</button>
+            </section>
+            <section id="client-discover" class="find-frame"><p class="eyebrow">Выбор остаётся за вами</p><h2>Нужен другой специалист?</h2><p>Можно вернуться к подбору и посмотреть другие анкеты.</p><a href="/" class="text-button">Перейти к подбору</a></section>
+            <section class="help-frame"><h2>Мы рядом, если нужна помощь</h2><p>Поможем разобраться с записью и работой кабинета.</p><button class="text-button" data-client-open="support" type="button">Обратиться в поддержку</button></section>
+          </aside></div>
         </section>
         <section data-client-view="meetings" hidden>
           <div class="dashboard-heading"><h1>Мои встречи</h1><button id="client-refresh" type="button" class="text-button">Обновить</button></div>

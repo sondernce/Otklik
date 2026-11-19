@@ -234,7 +234,7 @@ test('client and psychologist support tickets stay separate; admin can answer an
   const ticket=(await get(f.client,'/api/client/support/tickets')).tickets[0];
   const adminPage=await admin.newPage(),errors=[];adminPage.on('pageerror',error=>errors.push(error.message));
   t.after(async()=>{await adminPage.close();assert.deepEqual(errors,[]);});
-  await adminPage.goto(origin+'/admin');const adminSupport=adminPage.locator('#admin-support');
+  await adminPage.goto(origin+'/admin#admin-support');const adminSupport=adminPage.locator('#admin-support');
   await adminSupport.locator(`[data-ticket="${ticket.id}"]`).click();
   await adminSupport.getByText('Нужна помощь с переносом.',{exact:true}).waitFor();
   await adminSupport.locator('[data-message-body]').fill('Поможем разобраться.');
@@ -386,7 +386,7 @@ for(const role of ['client','psychologist']){
       await page.locator(role==='client'?'#client-workspace':'#workspace').waitFor({state:'visible'});
       release();await done;await page.evaluate(()=>window.pendingAppointmentRefresh);
       assert.equal(await cards.locator('[data-appointment]').count(),0,'Previous account appointments leaked into the new workspace');
-      if(role==='client')assert.equal(await page.locator('#client-next').innerText(),'Пока нет предстоящих встреч');
+      if(role==='client')assert.match(await page.locator('#client-next').innerText(),/Найдите того/);
       else assert.equal(await page.locator('#profile-form [name=name]').inputValue(),'');
     }finally{release();}
   });
@@ -470,17 +470,19 @@ test('admin overview shows real counts, safe audit filters and links to related 
   const expected=await get(admin,'/api/admin/overview');
   await page.goto(origin+'/admin');
   await page.getByText('Обзор обновлён. Время указано по Москве.',{exact:true}).waitFor();
-  assert.equal(await page.locator('#monitor-users .detail-row').filter({has:page.locator('dt',{hasText:'Всего пользователей'})}).locator('dd').innerText(),String(expected.users.total));
+  assert.equal(await page.locator('#monitor-users .metric-card').filter({has:page.locator('dt',{hasText:'Всего пользователей'})}).locator('dd').innerText(),String(expected.users.total));
   assert.match(await page.locator('#monitor-service').innerText(),/Не настроены/);
+  await page.locator('.admin-navigation a[href="#monitor-journal"]').click();
   await page.locator('#monitor-category').selectOption('admin');await page.locator('#monitor-kind').selectOption('profile_hidden');
   await page.locator('#monitor-filter').getByRole('button',{name:'Применить фильтры',exact:true}).click();
-  const event=page.locator('#monitor-events li').filter({has:page.locator(`[data-monitor-id="${f.profile.id}"]`)});
+  const event=page.locator('#monitor-events li').filter({has:page.locator(`[data-monitor-id="${f.profile.id}"]`),hasText:'Профиль скрыт'});
   await event.getByText('Профиль скрыт',{exact:true}).waitFor();
   assert.ok(!(await page.locator('#monitor-events').innerText()).includes('PRIVATE-AUDIT-NOTE'));
   await event.getByRole('button',{name:'Открыть',exact:true}).click();
   await page.locator('#detail h2').getByText('Тестовый психолог',{exact:true}).waitFor();
   assert.equal(await page.locator('#status-filter').inputValue(),'all');
   await page.locator('#decision-note').fill('Несохранённое решение администратора');
+  await page.bringToFront();
   await page.clock.install();
   const automatic=page.waitForResponse(response=>response.url().includes('/api/admin/overview?'));
   await page.clock.runFor(30001);await automatic;
@@ -524,4 +526,21 @@ test('late admin monitoring response cannot restore data after logout',async t=>
   assert.equal(await page.locator('#monitor-service').innerText(),'');
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   assert.equal(await page.locator('#monitor-users').innerText(),'');
+});
+
+test('client home opens its real meeting, keeps section on reload and validates registration inline', async t => {
+  const f=await fixture(t),item=await confirmed(f);
+  await f.page.goto(origin+'/client');
+  await f.page.locator('#client-specialist').getByText('Тестовый психолог',{exact:true}).waitFor();
+  await f.page.locator('#client-next [data-home-appointment]').first().click();
+  await f.page.locator(`[data-appointment="${item.id}"]`).waitFor({state:'visible'});
+  assert.equal(new URL(f.page.url()).hash,'#meetings');
+  await f.page.reload();
+  await f.page.locator('[data-client-view="meetings"]').waitFor({state:'visible'});
+  await f.page.locator('[data-client-tab="settings"]').click();
+  await f.page.goBack();
+  await f.page.locator('[data-client-view="meetings"]').waitFor({state:'visible'});
+  const anon=await browser.newContext();t.after(()=>anon.close());const page=await anon.newPage();
+  await page.goto(origin+'/client');await page.locator('#client-auth-submit').click();
+  for(const id of ['client-name','client-age','client-email','client-password'])assert.equal(await page.locator('#'+id).getAttribute('aria-invalid'),'true');
 });

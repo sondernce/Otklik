@@ -57,6 +57,26 @@ class BookingTest(unittest.TestCase):
         self.assertEqual(self.appointments()[0]['status'], 'confirmed')
         self.assertEqual(self.request('psy', 'POST', '/api/psychologist/schedule', {'revision': p['revision'], 'slots': []})[0], 409)
 
+    def test_client_home_uses_only_approved_presentation_fields(self):
+        p = self.ready()
+        self.client()
+        self.book(p)
+        approved = booking.publication
+        with server.connection() as db:
+            published = approved(db, p['id'])
+            row = db.execute('SELECT data FROM profiles WHERE id=?', (p['id'],)).fetchone()
+            draft = json.loads(row[0])
+            draft.update(approach='Непроверенный подход', photo='private-draft-photo', contact='private-contact')
+            db.execute('UPDATE profiles SET data=? WHERE id=?', (json.dumps(draft), p['id']))
+        item = self.appointments()[0]
+        self.assertEqual(item['psychologist_approach'], published['approach'])
+        self.assertEqual(item['psychologist_photo'], published.get('photo', ''))
+        self.assertNotIn('contact', item)
+        self.assertNotIn('profile_data', item)
+        self.assertNotIn('psychologist_photo', self.appointments('psy', 'psychologist')[0])
+        self.client('other')
+        self.assertEqual(self.appointments('other'), [])
+
     def test_automatic_approval_and_restart(self):
         p = self.ready()
         self.client()

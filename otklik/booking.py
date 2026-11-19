@@ -133,7 +133,12 @@ def listings(db, role, ident=None):
             link = db.execute('SELECT url FROM appointment_video WHERE appointment_id=?', (item['id'],)).fetchone()
             if link:
                 item['video_url'] = link[0]
-        result.append(public_appointment(item))
+        public = public_appointment(item)
+        if role == 'client':
+            profile = publication(db, item['profile_id']) or {}
+            public['psychologist_photo'] = profile.get('photo', '')
+            public['psychologist_approach'] = profile.get('approach', '')
+        result.append(public)
     return result
 
 
