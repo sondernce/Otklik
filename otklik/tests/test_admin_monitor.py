@@ -84,7 +84,7 @@ class MonitorTest(unittest.TestCase):
         self.assertEqual(data['users']['registrations'],{'client':1,'psychologist':1})
         self.assertEqual(data['profiles']['approved'],1)
         self.assertTrue(data['service']['database_available'])
-        self.assertEqual(data['service']['schema_version'],7)
+        self.assertEqual(data['service']['schema_version'],database.SCHEMA_VERSION)
         self.assertNotIn('@test.invalid',json.dumps(data))
         code,old=self.request('admin','GET','/api/admin/overview?from=2000-01-01&to=2000-01-02')
         self.assertEqual(code,200);self.assertEqual(old['users']['registrations'],{'client':0,'psychologist':0})
@@ -242,7 +242,7 @@ class MonitorTest(unittest.TestCase):
             self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],6)
             self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name='admin_events'").fetchone())
         with database.connect(server.DB) as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],7)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],database.SCHEMA_VERSION)
             self.assertEqual(db.execute('SELECT count(*) FROM admin_events').fetchone()[0],0)
         self.assertEqual(self.request('client','GET','/api/client/me')[1]['client']['id'],client['id'])
         self.assertEqual(self.overview()['users']['legacy_unknown_date'],1)
@@ -305,7 +305,7 @@ class MonitorTest(unittest.TestCase):
         with patch.object(maintenance,'record',side_effect=PermissionError('PRIVATE-PATH')),redirect_stdout(capture):
             self.assertEqual(backup.main(['create','--database',str(server.DB),'--output',str(output)]),0)
         result=json.loads(capture.getvalue());self.assertIn('monitoring_warning',result)
-        self.assertNotIn('PRIVATE-',capture.getvalue());self.assertEqual(backup.verify(output)['schema_version'],7)
+        self.assertNotIn('PRIVATE-',capture.getvalue());self.assertEqual(backup.verify(output)['schema_version'],database.SCHEMA_VERSION)
 
     def test_followup_messages_do_not_reset_unanswered_support_wait(self):
         self.client()

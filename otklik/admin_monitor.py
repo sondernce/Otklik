@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 import diagnostics
 import maintenance
+import mail_queue
 
 VERSION = '0.7.0'
 STARTED = time.monotonic()
@@ -193,4 +194,4 @@ def overview(db, params, database_path, log_dir):
             'profiles':profiles,'meetings':meetings,'tasks':tasks,'cancellations':cancellations,
             'errors':{'count':len(errors),'groups':sorted(groups.values(),key=lambda x:x['count'],reverse=True)[:20],'latest':errors[:10],'available':logs['available'],'partial':logs['partial'],'scope':'Учитываются только сохранившиеся файлы журнала, до 3 МиБ.'},
             'service':{'version':VERSION,'schema_version':db.execute('PRAGMA user_version').fetchone()[0],'uptime_seconds':int(time.monotonic()-STARTED),'database_available':True,'database_bytes':Path(database_path).stat().st_size,'disk_free_bytes':free},
-            'maintenance':maintenance_status,'warnings':warnings}
+            'maintenance':maintenance_status,'mail':mail_queue.summary(db),'warnings':warnings}

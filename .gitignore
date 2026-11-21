@@ -21,3 +21,6 @@ __MACOSX/
 # Local monitoring receipts
 *.maintenance.json
 *.maintenance.lock
+
+# Local email previews may contain private links
+mail-preview/

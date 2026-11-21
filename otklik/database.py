@@ -11,7 +11,7 @@ from timestamps import instant
 from publications import publish
 
 MIGRATION_LOCK = threading.RLock()
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 
 class UnsupportedSchema(ValueError):
@@ -138,6 +138,10 @@ def migrate(db, path):
             import admin_monitor
             admin_monitor.install(db)
             db.execute('PRAGMA user_version=7')
+        if db.execute('PRAGMA user_version').fetchone()[0] == 7:
+            import mail_queue
+            mail_queue.install(db)
+            db.execute('PRAGMA user_version=8')
         db.commit()
     except Exception:
         db.rollback()

@@ -5,6 +5,7 @@
 - [План доработки проекта](development-plan.md).
 - [Архитектура и структура файлов](docs/architecture.md).
 - [Резервные копии и восстановление](docs/backup-and-restore.md).
+- [Почтовая очередь и локальная проверка](docs/email.md).
 - [Обзор и журналы администратора](docs/admin-monitoring.md).
 - [Запуск и диагностика ошибок](docs/local-diagnostics.md).
 - [Проверка текущих сценариев](docs/workflow-review.md).
