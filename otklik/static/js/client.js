@@ -1,6 +1,8 @@
 'use strict';
 const ui = window.BookingUI;
 const find = id => document.getElementById(id);
+const accountManagement=AccountManagement.mount(find('client-account-management'),'client',async text=>{sessionEpoch++;clearWorkspace();await boot();message(text);});
+const emailAccess=EmailAccessUI.mount(find('client-email-access'),'client');
 const support = CommunicationUI.mountSupport(find('client-support'),'client');
 const chat=CommunicationUI.mountChat(find('client-appointments'),find('client-chat'),'client');
 const notices=CommunicationUI.mountNotifications(find('client-notifications'),'client',async (item,isCurrent)=>{
@@ -12,7 +14,7 @@ const notices=CommunicationUI.mountNotifications(find('client-notifications'),'c
 let mode = 'register', user = null, draft = null, sessionEpoch=0, appointmentLoad=0;
 function currentSession(){const epoch=sessionEpoch;return()=>epoch===sessionEpoch&&user!==null;}
 function clearWorkspace(){
-  user=null;CommunicationUI.reset('client');
+  user=null;accountManagement.stop();emailAccess.stop();CommunicationUI.reset('client');
   find('client-appointments').replaceChildren();find('client-settings').reset();find('client-settings').querySelector('button').disabled=false;
   find('client-settings-message').textContent='';find('client-greeting').textContent='Мои встречи';
   find('client-next').replaceChildren();find('client-specialist').replaceChildren();find('client-specialist').hidden=true;
@@ -70,8 +72,9 @@ async function boot() {
   } else {
     find('client-auth').before(find('client-message'), find('booking-draft'));
     calendarMonth = null;
+    if(location.hash==='#login')switchMode('login');
   }
-  if (user) {showView(['overview','meetings','settings','support'].includes(location.hash.slice(1))?location.hash.slice(1):'overview',false);support.start();notices.start();find('client-greeting').textContent = `${user.name}, добрый день`; await refresh();}
+  if (user) {accountManagement.start();emailAccess.start();showView(['overview','meetings','settings','support'].includes(location.hash.slice(1))?location.hash.slice(1):'overview',false);support.start();notices.start();find('client-greeting').textContent = `${user.name}, добрый день`; await refresh();}
   return epoch===sessionEpoch;
 }
 find('client-register-tab').addEventListener('click', () => switchMode('register'));

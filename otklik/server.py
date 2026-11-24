@@ -23,6 +23,9 @@ import access
 import database
 import diagnostics
 import admin_monitor
+import email_access
+import accounts
+import outcomes
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get('OTKLIK_DB', ROOT / '.local' / 'otklik.sqlite3'))
@@ -40,7 +43,7 @@ def has_admin():
 
 
 def password_hash(password, salt):
-    return hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1).hex()
+    return access.password_hash(password,salt)
 
 
 def validate(data):
@@ -134,7 +137,8 @@ def decorate(p, db=None):
     p.setdefault('revision', 0)
     p.setdefault('history', [])
     p['has_publication'] = booking.publication(db, p['id']) is not None
-    p['published'] = p['has_publication'] and not p['hidden'] and not p['deleted'] and bool(future_slots(p, db))
+    p['account_status'] = accounts.state(db,'psychologist',p.get('owner_id'))['status']
+    p['published'] = p['account_status']=='active' and p['has_publication'] and not p['hidden'] and not p['deleted'] and bool(future_slots(p, db))
     setting = db.execute('SELECT auto_approve FROM booking_settings WHERE profile_id=?', (p['id'],)).fetchone()
     p['auto_approve'] = bool(setting and setting[0])
     return p
@@ -210,7 +214,7 @@ class Handler(BaseHTTPRequestHandler):
         with connection() as db:
             row = db.execute('SELECT c.id,c.name,c.email,d.age FROM clients c JOIN client_sessions s ON s.client_id=c.id LEFT JOIN client_details d ON d.client_id=c.id '
                              'WHERE s.token_hash=? AND s.expires>?', (hashlib.sha256(token.encode()).hexdigest(), time.time())).fetchone()
-            return dict(row) if row else None
+            return dict(row) if row and access.active(db,'client',row['id']) else None
 
     def do_GET(self):
         self.request_id=secrets.token_hex(16)
@@ -233,6 +237,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def get_request(self):
         path = urlsplit(self.path).path
+        if path == '/api/admin/accounts':
+            if not self.authorized():return self.send(401,{'error':'Войдите в кабинет администратора.'})
+            with connection() as db:result=accounts.listing(db,{k:v[0] for k,v in parse_qs(urlsplit(self.path).query).items()})
+            return self.send(200,result)
+        if path in {'/api/client/email/status','/api/psychologist/email/status'}:
+            return self.email_request(path,{},write=False)
         if self.is_communication_path(path):
             query = parse_qs(urlsplit(self.path).query, keep_blank_values=True)
             return self.communication_request(path, {key: values[0] for key, values in query.items()})
@@ -241,6 +251,7 @@ class Handler(BaseHTTPRequestHandler):
             if not client:
                 return self.send(401, {'error': 'Войдите в кабинет клиента.'})
             if path.endswith('/me'):
+                with connection() as db:client['email_verified']=email_access.verified(db,'client',client['id'],client['email'])
                 return self.send(200, {'client': client})
             with connection() as db:
                 items = booking.listings(db, 'client', client['id'])
@@ -259,7 +270,8 @@ class Handler(BaseHTTPRequestHandler):
             with connection() as db:
                 user = db.execute('SELECT email FROM psychologists WHERE id=?', (owner,)).fetchone()
                 p = owned_profile(db, owner)
-            return self.send(200, {'email': user[0], 'profile': p})
+            with connection() as db:confirmed=email_access.verified(db,'psychologist',owner,user[0])
+            return self.send(200, {'email': user[0], 'profile': p,'email_verified':confirmed})
         if path in {'/api/admin/overview','/api/admin/events'}:
             if not self.authorized():
                 return self.send(401, {'error':'Войдите в кабинет администратора.'})
@@ -310,6 +322,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self.logout(logout_roles[path])
             if self.is_communication_path(path):
                 return self.communication_request(path, data, write=True)
+            if path in {'/api/admin/accounts/status','/api/admin/appointments/outcome'}:
+                if not self.authorized():return self.send(401,{'error':'Войдите в кабинет администратора.'})
+                with connection() as db:result=accounts.set_status(db,data) if path.endswith('/status') else outcomes.report(db,'admin','administrator',data)
+                return self.send(200,result)
+            if path in {f'/api/{role}/account/{action}' for role in ('client','psychologist') for action in ('email-change','confirm-email','delete')}:
+                return self.account_request(path,data)
+            if path in {f'/api/{role}/{endpoint}' for role in ('client','psychologist') for endpoint in ('email/request-verification','email/confirm','password/request-reset','password/reset')}:
+                return self.email_request(path,data)
             if path.startswith('/api/client/'):
                 return self.client_request(path, data)
             if path.startswith('/api/psychologist/appointments/') and path != '/api/psychologist/appointments/decision':
@@ -329,6 +349,7 @@ class Handler(BaseHTTPRequestHandler):
                         if type(data.get('auto_approve')) is not bool:
                             raise ValueError('Выберите способ подтверждения записи.')
                         db.execute('BEGIN IMMEDIATE')
+                        access.ensure_active(db,'psychologist',owner)
                         p = owned_profile(db, owner)
                         if not p or p['deleted']:
                             return self.send(403, {'error': 'Настройка недоступна.'})
@@ -382,6 +403,8 @@ class Handler(BaseHTTPRequestHandler):
                         if not row or not hmac.compare_digest(row[2], password_hash(password, row[1])):
                             return self.send(401, {'error': 'Неверная почта или пароль.'})
                         owner = row[0]
+                    if path.endswith('/register'):
+                        email_access.issue(db,'psychologist',{'id':owner,'email':email},'verify',self.email_origin())
                     token = access.issue(db, 'psychologist', owner, access.token(self.headers.get('Cookie', ''), 'psychologist'))
                 return self.send(200, {'ok': True}, access.cookie('psychologist', token))
             if path.startswith('/api/psychologist/'):
@@ -394,6 +417,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send(404, {'error': 'Маршрут не найден.'})
                 with connection() as db:
                     db.execute('BEGIN IMMEDIATE')
+                    access.ensure_active(db,'psychologist',owner)
                     p = owned_profile(db, owner)
                     if not p or p['deleted']:
                         return self.send(403, {'error': 'Профиль удалён администратором. Обратитесь к владельцу сервиса.'})
@@ -446,6 +470,7 @@ class Handler(BaseHTTPRequestHandler):
                     if not row:
                         return self.send(404, {'error': 'Профиль не найден. Психолог заполняет анкету самостоятельно.'})
                     p = decorate(json.loads(row[0]), db)
+                    if p['account_status']=='deleted':return self.send(409,{'error':'Аккаунт специалиста удалён. Анкету нельзя восстановить или изменить.'})
                     if data.get('revision') != p['revision']:
                         return self.send(409, {'error': 'Анкета изменилась. Обновите список перед действием.'})
                     if path.endswith('/review'):
@@ -550,6 +575,8 @@ class Handler(BaseHTTPRequestHandler):
                     ident = row['id']
                 if path.endswith('/register') and age is not None:
                     db.execute('INSERT INTO client_details VALUES (?,?)', (ident, age))
+                if path.endswith('/register'):
+                    email_access.issue(db,'client',{'id':ident,'email':email},'verify',self.email_origin())
                 token = access.issue(db, 'client', ident, access.token(self.headers.get('Cookie', ''), 'client'))
             return self.send(200, {'ok': True}, access.cookie('client', token))
         client = self.client()
@@ -569,6 +596,52 @@ class Handler(BaseHTTPRequestHandler):
             return self.appointment_action('client', client['id'], path, data)
         return self.send(404, {'error': 'Маршрут не найден.'})
 
+    def account_request(self,path,data):
+        role=path.split('/')[2];action=path.rsplit('/',1)[1]
+        if action=='confirm-email':
+            self.check_email_token_limit(role,data.get('token'))
+            with connection() as db:
+                result=accounts.confirm_change(db,role,data.get('token'))
+                remaining=access.identify(db,role,access.token(self.headers.get('Cookie',''),role))
+            return self.send(200,result,None if remaining else access.cookie(role,clear=True))
+        with connection() as db:actor=access.identify(db,role,access.token(self.headers.get('Cookie',''),role))
+        if not actor:return self.send(401,{'error':'Войдите в соответствующий кабинет.'})
+        self.check_login_limit('account-sensitive-'+role,actor)
+        with connection() as db:
+            result=accounts.erase(db,role,actor,data) if action=='delete' else accounts.request_change(db,role,actor,data,self.client_address[0],self.email_origin())
+        return self.send(200,result,access.cookie(role,clear=True) if action=='delete' else None)
+
+    def email_origin(self):
+        # Only the exact local origins already accepted by do_POST are reusable.
+        origin=self.headers.get('Origin')
+        return origin if origin in {f'http://127.0.0.1:{PORT}',f'http://localhost:{PORT}'} else f'http://127.0.0.1:{PORT}'
+
+    def email_request(self,path,data,write=True):
+        role=path.split('/')[2]
+        endpoint='/'.join(path.split('/')[3:])
+        origin=self.email_origin()
+        with connection() as db:
+            if endpoint=='password/request-reset' and write:
+                result=email_access.request_reset(db,role,data.get('email'),self.client_address[0],origin)
+            elif endpoint in ('email/confirm','password/reset') and write:
+                # Bearer secrets are accepted only in POST JSON, never query parameters.
+                self.check_email_token_limit(role,data.get('token'))
+                result=email_access.consume(db,role,'verify' if endpoint=='email/confirm' else 'reset',data.get('token'),data.get('password'))
+            else:
+                actor=access.identify(db,role,access.token(self.headers.get('Cookie',''),role))
+                if not actor:return self.send(401,{'error':'Войдите в соответствующий кабинет.'})
+                if endpoint=='email/request-verification' and write:
+                    result=email_access.request_verification(db,role,actor,self.client_address[0],origin)
+                elif endpoint=='email/status' and not write:
+                    item=email_access.account(db,role,actor)
+                    result={'email_verified':email_access.verified(db,role,actor,item['email']),'transport':email_access.settings(origin)[0]}
+                else:return self.send(404,{'error':'Маршрут не найден.'})
+        return self.send(200,result)
+
+    def check_email_token_limit(self,role,token):
+        with connection() as db:
+            access.throttle(db,'email-token-'+role,self.client_address[0],access.digest(token) if isinstance(token,str) and len(token)<=200 else 'invalid',registration=False)
+
     def trusted_host(self):
         return self.headers.get_all('Host') in ([f'127.0.0.1:{PORT}'], [f'localhost:{PORT}'])
 
@@ -585,7 +658,9 @@ class Handler(BaseHTTPRequestHandler):
         action = path.removeprefix(f'/api/{role}/appointments/')
         functions = {'cancel': booking.cancel, 'reschedule/propose': booking.propose_change, 'reschedule/respond': booking.respond_change}
         with connection() as db:
-            if action == 'video-link' and role == 'psychologist':
+            if action == 'outcome':
+                response = outcomes.report(db,role,actor,data)
+            elif action == 'video-link' and role == 'psychologist':
                 response = video_links.update(db, actor, data)
             elif action == 'reschedule/options':
                 response = booking.change_options(db, role, actor, data.get('id'))

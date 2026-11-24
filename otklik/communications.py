@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import secrets
 
 import booking
+import access
 
 
 class RateLimit(ValueError):
@@ -79,6 +80,7 @@ def send_appointment(db, role, actor, data):
 
 
 def owned_ticket(db, role, actor, ident):
+    access.ensure_active(db,role,actor)
     if not isinstance(ident, str):
         raise ValueError('Выберите обращение.')
     row = db.execute('SELECT * FROM support_tickets WHERE id=?', (ident,)).fetchone()
@@ -98,6 +100,7 @@ def public_ticket(db, item):
 
 
 def tickets(db, role, actor, before=None):
+    access.ensure_active(db,role,actor)
     conditions, params = [], []
     if role != 'admin':
         conditions.append('owner_role=? AND owner_id=?')
@@ -133,6 +136,7 @@ def create_ticket(db, role, actor, data):
     body = text(data.get('body'), 4000, 'Сообщение')
     key = request_key(data)
     db.execute('BEGIN IMMEDIATE')
+    access.ensure_active(db,role,actor)
     previous = db.execute('SELECT * FROM support_tickets WHERE owner_role=? AND owner_id=? AND request_key=?', (role, actor, key)).fetchone()
     if previous:
         first = db.execute('SELECT body FROM support_messages WHERE ticket_id=? ORDER BY id LIMIT 1', (previous['id'],)).fetchone()

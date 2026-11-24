@@ -5,6 +5,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server
@@ -12,6 +13,8 @@ import server
 
 class WorkflowTest(unittest.TestCase):
     def setUp(self):
+        local_mail=patch.dict('os.environ',{'OTKLIK_MAIL_TRANSPORT':'local'})
+        local_mail.start();self.addCleanup(local_mail.stop)
         self.temp = tempfile.TemporaryDirectory()
         server.DB = Path(self.temp.name) / 'test.sqlite3'
         self.http = server.ThreadingHTTPServer(('127.0.0.1', 0), server.Handler)

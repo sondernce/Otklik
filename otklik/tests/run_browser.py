@@ -12,6 +12,7 @@ import server
 
 
 def main():
+    os.environ['OTKLIK_MAIL_TRANSPORT']='local'
     with tempfile.TemporaryDirectory(prefix='otklik-browser-') as folder:
         server.DB = Path(folder) / 'test.sqlite3'
         server.connection().close()
@@ -22,10 +23,11 @@ def main():
         env = os.environ | {
             'OTKLIK_TEST_ORIGIN': f'http://127.0.0.1:{server.PORT}',
             'OTKLIK_BROWSER_TEST': 'isolated-server',
+            'OTKLIK_TEST_DATABASE':str(server.DB),
         }
         try:
             result = subprocess.run(['node', '--test', *sys.argv[1:], str(ROOT/'tests/browser.test.cjs')],
-                                    cwd=ROOT, env=env, timeout=180)
+                                    cwd=ROOT, env=env, timeout=300)
             return result.returncode
         except FileNotFoundError:
             print('Для браузерных проверок требуется Node.js.', file=sys.stderr)

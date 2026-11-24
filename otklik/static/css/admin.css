@@ -312,3 +312,5 @@
 .admin-page .admin-main #logout { background: #fff; color: #315b9b; border-color: #d2deed; }
 .admin-page .admin-main #logout:hover { background: #edf3fb; }
 .admin-page .metric-dialog-heading .text-button { border: 0; background: transparent; text-decoration: none; color: #536477; }
+
+#admin-accounts button.danger { background: #FBEBEB; color: #B84E4E; border-color: #E0E4EB; }

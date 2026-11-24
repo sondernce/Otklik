@@ -172,7 +172,7 @@ class MailTest(unittest.TestCase):
             db.execute('DROP TABLE mail_outbox');db.execute('PRAGMA user_version=7')
             db.execute("INSERT INTO settings VALUES('preserved','value')")
         with database.connect(self.path) as db:
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],8)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],database.SCHEMA_VERSION)
             self.assertEqual(db.execute("SELECT value FROM settings WHERE key='preserved'").fetchone()[0],'value')
         copies=list((self.path.parent/'backups').glob('*'));self.assertTrue(copies)
         with closing(sqlite3.connect(copies[0])) as db:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],7)
@@ -186,7 +186,7 @@ class MailTest(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as db:
             self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],7)
             self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name='mail_outbox'").fetchone())
-        with database.connect(self.path) as db:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],8)
+        with database.connect(self.path) as db:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],database.SCHEMA_VERSION)
 
     def test_repeated_event_keeps_identity_after_original_expiry(self):
         stamp=time.time();expiry=stamp+3600

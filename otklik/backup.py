@@ -41,6 +41,10 @@ def inspect(db):
         required |= {'account_registry','admin_events'}
     if version >= 8:
         required.add('mail_outbox')
+    if version >= 9:
+        required |= {'email_status','email_tokens','email_requests'}
+    if version >= 10:
+        required |= {'account_states','email_changes','appointment_outcomes','outcome_requests'}
     present = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not required <= present:
         raise ValueError('В файле отсутствуют таблицы Отклика.')
@@ -80,6 +84,8 @@ def snapshot(source, output, restore=False):
                 # A backup must not revive sessions revoked after it was created.
                 for table in ('client_sessions','psychologist_sessions','admin_sessions'):
                     db.execute(f'DELETE FROM {table}')
+                db.execute('UPDATE email_tokens SET revoked=1 WHERE used_at IS NULL')
+                db.execute('UPDATE email_changes SET revoked=1 WHERE used_at IS NULL')
                 db.execute("UPDATE mail_outbox SET status=CASE WHEN status IN ('pending','sending','unknown') THEN 'cancelled' ELSE status END,recipient='',subject='',body='',lease=NULL,lease_until=NULL,last_error='restored'")
         result = verify(stage)
         with open(stage, 'rb') as snapshot_file:

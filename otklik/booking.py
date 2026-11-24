@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 import json
 import secrets
+import access
 import sqlite3
 from database import SCHEMA_VERSION, connect, migrate
 from timestamps import now, instant
@@ -25,6 +26,8 @@ def active_clause(alias='a'):
 
 
 def available_slots(db, profile_id):
+    owner=db.execute("SELECT json_extract(data,'$.owner_id') FROM profiles WHERE id=?",(profile_id,)).fetchone()
+    if owner and not access.active(db,'psychologist',owner[0]):return []
     stamp = now()
     return [r[0] for r in db.execute(
         "SELECT s.start_at FROM slots s WHERE s.profile_id=? AND s.active=1 AND s.start_at>? "
@@ -62,6 +65,7 @@ def create(db, client_id, data):
     start = instant(data.get('start_at')).isoformat()
     db.execute('BEGIN IMMEDIATE')
     expire(db)
+    access.ensure_active(db,'client',client_id)
     previous = db.execute('SELECT * FROM appointments WHERE client_id=? AND request_key=?', (client_id, key)).fetchone()
     if previous:
         first_move = db.execute("SELECT from_start FROM appointment_events WHERE appointment_id=? AND action='rescheduled' ORDER BY id LIMIT 1", (previous['id'],)).fetchone()
@@ -72,7 +76,7 @@ def create(db, client_id, data):
     row = db.execute('SELECT data FROM profiles WHERE id=?', (profile_id,)).fetchone()
     p = json.loads(row[0]) if row else {}
     public = publication(db, profile_id)
-    if not public or p.get('hidden') or p.get('deleted'):
+    if not public or p.get('hidden') or p.get('deleted') or not access.active(db,'psychologist',p.get('owner_id')):
         raise Conflict('Психолог сейчас недоступен для новых записей.')
     slot = db.execute('SELECT * FROM slots WHERE profile_id=? AND start_at=? AND active=1', (profile_id, start)).fetchone()
     if not slot or start <= now():
@@ -98,10 +102,12 @@ def decide(db, owner, ident, action):
         raise ValueError('Выберите заявку и действие.')
     db.execute('BEGIN IMMEDIATE')
     expire(db)
+    access.ensure_active(db,'psychologist',owner)
     row = db.execute('SELECT a.* FROM appointments a JOIN profiles p ON p.id=a.profile_id '
                      "WHERE a.id=? AND json_extract(p.data,'$.owner_id')=?", (ident, owner)).fetchone()
     if not row:
         raise Conflict('Заявка не найдена или недоступна.')
+    if action=='confirm':access.ensure_active(db,'client',row['client_id'])
     target = 'confirmed' if action == 'confirm' else 'declined'
     if row['cancelled']:
         raise Conflict('Встреча отменена.')
@@ -127,6 +133,8 @@ def listings(db, role, ident=None):
         item = dict(row)
         if item['status'] == 'pending' and (item['expires_at'] <= now() or item['start_at'] <= now()):
             item['status'] = 'expired'
+        import outcomes
+        item['outcome'] = outcomes.summary(db,item['id'])
         item['change'] = pending_change(db, item['id'])
         item['history'] = [dict(event) for event in db.execute('SELECT action,actor,at,from_start,to_start FROM appointment_events WHERE appointment_id=? ORDER BY id', (item['id'],))]
         if role != 'admin' and item['status'] == 'confirmed' and not item['cancelled']:
@@ -146,7 +154,7 @@ def public_appointment(item):
     item = dict(item)
     if item.get('cancelled'):
         item['status'] = 'cancelled'
-    return {key: item[key] for key in ('id', 'profile_id', 'start_at', 'end_at', 'price', 'psychologist_name', 'status', 'expires_at', 'revision', 'cancelled_by', 'change', 'history', 'video_url') if key in item} | (
+    return {key: item[key] for key in ('id', 'profile_id', 'start_at', 'end_at', 'price', 'psychologist_name', 'status', 'expires_at', 'revision', 'cancelled_by', 'change', 'history', 'video_url', 'outcome') if key in item} | (
         {'client_name': item['client_name']} if 'client_name' in item else {})
 
 
@@ -168,6 +176,7 @@ def pending_change(db, appointment_id):
 
 
 def owned_appointment(db, role, actor, ident):
+    access.ensure_active(db,role,actor)
     if not isinstance(ident, str):
         raise ValueError('Выберите встречу.')
     if role == 'client':
@@ -232,6 +241,9 @@ def change_options(db, role, actor, ident):
 
 
 def apply_change(db, item, change, actor):
+    owner=db.execute("SELECT json_extract(data,'$.owner_id') FROM profiles WHERE id=?",(item['profile_id'],)).fetchone()[0]
+    access.ensure_active(db,'psychologist',owner)
+    access.ensure_active(db,'client',item['client_id'])
     slot = db.execute('SELECT * FROM slots WHERE id=? AND active=1', (change['slot_id'],)).fetchone()
     if not slot or slot['start_at'] <= now() or busy_for_change(db, item, change['start_at'], change['end_at'], change['id']):
         raise Conflict('Предложенное время уже недоступно. Исходная встреча сохранена.')
@@ -249,6 +261,9 @@ def propose_change(db, role, actor, data):
     db.execute('BEGIN IMMEDIATE')
     expire(db)
     item = owned_appointment(db, role, actor, data.get('id'))
+    owner=db.execute("SELECT json_extract(data,'$.owner_id') FROM profiles WHERE id=?",(item['profile_id'],)).fetchone()[0]
+    access.ensure_active(db,'psychologist',owner)
+    access.ensure_active(db,'client',item['client_id'])
     previous = db.execute('SELECT * FROM appointment_changes WHERE appointment_id=? AND request_key=?', (item['id'], key)).fetchone()
     if previous:
         if previous['offered_by'] != role or previous['start_at'] != start:

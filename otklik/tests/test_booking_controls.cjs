@@ -15,3 +15,11 @@ assert.match(future,/data-booking-action="video-link"/);
 assert.match(future,/data-booking-action="cancel"/);
 assert.match(future,/data-booking-action="reschedule"/);
 console.log('Appointment controls match the existing server time restrictions.');
+
+const reportable={...meeting,end_at:'2000-01-01T12:50:00+00:00',outcome:{state:'unreported',revision:0}};
+assert.match(context.window.BookingUI.cards([reportable],'client'),/data-outcome-value/);
+assert.doesNotMatch(context.window.BookingUI.cards([{...reportable,status:'cancelled'}],'client'),/data-outcome-value/);
+assert.doesNotMatch(context.window.BookingUI.cards([{...reportable,end_at:'2099-01-01T12:50:00+00:00'}],'client'),/data-outcome-value/);
+const resolved={...reportable,outcome:{state:'resolved',revision:3,final_value:'held',client_report:'held'}};
+assert.doesNotMatch(context.window.BookingUI.cards([resolved],'client'),/data-outcome-value/);
+assert.match(context.window.BookingUI.cards([resolved],'admin'),/Сохранить итог администратора/);

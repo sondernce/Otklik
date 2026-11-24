@@ -116,7 +116,9 @@ def mark_read(db, role, actor, data):
         values = [data['target_kind'], data['target_id'], number(data['through_source_id'])]
     else:
         raise ValueError('Выберите уведомления для отметки прочитанными.')
+    import access
     db.execute('BEGIN IMMEDIATE')
+    access.ensure_active(db,role,actor)
     db.execute('UPDATE notifications SET read_at=? WHERE recipient_role=? AND recipient_id=? AND read_at IS NULL AND ' + condition,
                [datetime.now(timezone.utc).isoformat(), role, actor, *values])
     return counts(db, role, actor)

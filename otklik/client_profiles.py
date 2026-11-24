@@ -7,6 +7,9 @@ def validate_age(age):
 
 
 def update(db, client_id, data):
+    import access
+    db.execute('BEGIN IMMEDIATE')
+    access.ensure_active(db,'client',client_id)
     name, age = data.get('name'), data.get('age')
     if not isinstance(name, str) or not 2 <= len(name.strip()) <= 100:
         raise ValueError('Имя должно содержать от 2 до 100 символов.')

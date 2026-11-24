@@ -4,7 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex"><title>Мои встречи · Отклик</title>
   <link rel="stylesheet" href="/static/css/styles.css"><link rel="stylesheet" href="/static/css/admin.css"><link rel="stylesheet" href="/static/css/dashboard.css"><link rel="stylesheet" href="/static/css/client.css">
-  <script defer src="/static/js/http.js"></script><script defer src="/static/js/booking-ui.js"></script><script defer src="/static/js/communications-ui.js"></script><script defer src="/static/js/form-errors.js"></script><script defer src="/static/js/client-home.js"></script><script defer src="/static/js/client.js"></script>
+  <script defer src="/static/js/http.js"></script><script defer src="/static/js/booking-ui.js"></script><script defer src="/static/js/communications-ui.js"></script><script defer src="/static/js/form-errors.js"></script><script defer src="/static/js/client-home.js"></script><script defer src="/static/js/email-access-ui.js"></script><script defer src="/static/js/account-management.js"></script><script defer src="/static/js/client.js"></script>
 </head>
 <body class="client-page">
   <header class="header wrap"><a class="brand" href="/">отклик</a><span>Личный кабинет</span><a class="text-button" href="/">К подбору</a></header>
@@ -26,7 +26,7 @@
         <label id="client-age-label">Возраст<input id="client-age" type="number" min="1" max="120" step="1" required></label><label>Электронная почта<input id="client-email" type="email" autocomplete="email" maxlength="200" required></label>
         <label>Пароль · от 8 символов<input id="client-password" type="password" autocomplete="new-password" minlength="8" maxlength="200" required></label>
         <button id="client-auth-submit" class="primary">Создать кабинет</button>
-      </form>
+      </form><p><a class="text-button" href="/account-access#role=client&purpose=request">Забыли пароль?</a></p>
     </section>
     <section id="client-workspace" class="dashboard-shell" hidden>
       <aside class="dashboard-sidebar">
@@ -88,7 +88,7 @@
         </section>
         <section data-client-view="settings" hidden>
           <div class="dashboard-heading"><h1>Настройки</h1></div>
-          <form id="client-settings" class="panel settings-panel">
+          <section id="client-account-management"></section><section id="client-email-access" aria-label="Подтверждение почты"></section><form id="client-settings" class="panel settings-panel">
             <label>Имя<input name="name" minlength="2" maxlength="100" required></label>
             <label>Возраст<input name="age" type="number" min="1" max="120" step="1" required></label>
             <button class="primary">Сохранить</button>

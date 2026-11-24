@@ -39,6 +39,7 @@ def cookie(role, value='', clear=False):
 
 
 def issue(db, role, actor=None, previous=''):
+    if role!='admin':ensure_active(db,role,actor)
     table, column = TABLES[role]
     stamp = time.time()
     db.execute(f'DELETE FROM {table} WHERE expires<=?', (stamp,))
@@ -63,7 +64,7 @@ def identify(db, role, value):
     owner_table = 'clients' if role == 'client' else 'psychologists'
     row = db.execute(f'SELECT u.id FROM {table} s JOIN {owner_table} u ON u.id=s.{column} WHERE s.token_hash=? AND s.expires>?',
                      (digest(value), time.time())).fetchone()
-    return row['id'] if row else None
+    return row['id'] if row and active(db,role,row['id']) else None
 
 
 def revoke(db, role, value):
@@ -87,3 +88,17 @@ def throttle(db, role, address, identity='', registration=False):
         if db.execute('SELECT count(*) FROM login_attempts WHERE bucket=?', (key,)).fetchone()[0] >= limit:
             raise Limited('Слишком много попыток. Подождите минуту.')
     db.executemany('INSERT INTO login_attempts(bucket,attempted_at) VALUES(?,?)', [(key, stamp) for key, _ in buckets])
+
+
+def password_hash(password,salt):
+    return hashlib.scrypt(password.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex()
+
+
+def active(db,role,actor):
+    if role=='admin':return True
+    row=db.execute('SELECT status FROM account_states WHERE role=? AND account_id=?',(role,actor)).fetchone()
+    return row is None or row[0]=='active'
+
+
+def ensure_active(db,role,actor):
+    if not active(db,role,actor):raise ValueError('Аккаунт заблокирован или удалён. Войдите в доступный аккаунт.')

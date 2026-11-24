@@ -6,6 +6,15 @@ window.BookingUI = (() => {
   async function api(path, data) {
     return HttpAPI.request(path,data);
   }
+  const outcomeNames={held:'Встреча состоялась',client_absent:'Клиент не пришёл',psychologist_absent:'Психолог не пришёл'};
+  function outcomePanel(item,role){
+    if(item.status!=='confirmed'||!item.end_at||new Date(item.end_at)>new Date())return '';
+    const result=item.outcome||{state:'unreported',revision:0};
+    const state={unreported:'Результат ещё не указан',reported:'Ожидается ответ второй стороны',agreed:'Результат подтверждён участниками',disputed:'Ответы различаются, требуется разбор администратора',resolved:'Результат определён администратором'}[result.state]||'';
+    const report=role==='admin'?null:result[role+'_report'];
+    const canEdit=role==='admin'||!['agreed','resolved'].includes(result.state);
+    return `<section data-outcome data-outcome-revision="${result.revision}"><h4>Результат встречи</h4><p>${state}${result.final_value?': '+outcomeNames[result.final_value]:''}</p>${role==='admin'?`<p class="micro">Клиент: ${outcomeNames[result.client_report]||'Нет ответа'}. Психолог: ${outcomeNames[result.psychologist_report]||'Нет ответа'}.</p>`:report?`<p class="micro">Ваш ответ: ${outcomeNames[report]}</p>`:''}${canEdit?`<label>Что произошло<select data-outcome-value><option value="">Выберите результат</option>${Object.entries(outcomeNames).map(([value,label])=>`<option value="${value}">${label}</option>`).join('')}</select></label><p class="micro">${role==='admin'?'Решение увидят оба участника. Финансовые операции не выполняются.':'Ответ второй стороны нужен для подтверждения. При расхождении итог определяет администратор.'}</p><button type="button" class="text-button" data-booking-action="save-outcome">${role==='admin'?'Сохранить итог администратора':'Сохранить ответ о встрече'}</button>`:''}</section>`;
+  }
   function cards(items, role) {
     if (!items.length) return '<p class="subtext">Записей пока нет.</p>';
     return items.map(item => {
@@ -29,7 +38,7 @@ window.BookingUI = (() => {
       }
       const events = {rescheduled:'Время изменено',cancelled:'Встреча отменена',change_proposed:'Предложен перенос',change_declined:'Перенос отклонён',change_cancelled:'Перенос отозван'};
       const history = (item.history || []).map(event => `<li>${events[event.action] || escape(event.action)} · ${event.actor === 'client'?'клиент':'психолог'} · ${date(event.at)}${event.to_start?' → '+date(event.to_start):''}</li>`).join('');
-      return `<article class="appointment-card" ${attributes}><h3>${escape(role === 'client' ? item.psychologist_name : item.client_name)}</h3>${role==='admin'?`<p>Психолог: ${escape(item.psychologist_name)}</p>`:''}<p>${date(item.start_at)} · 50 минут</p><p>${escape(item.price)} ₽ · ${statuses[item.status] || escape(item.status)}</p>${item.status==='pending'?`<p class="micro">Ответ психолога до ${date(item.expires_at)}. Без подтверждения время освободится.</p>`:''}${item.status==='cancelled'?`<p class="micro">Отменил ${item.cancelled_by==='client'?'клиент':'психолог'}.</p>`:''}${pending?`<div class="notice"><b>Предложен перенос на ${date(pending.start_at)}</b><p>${pending.offered_by==='client'?'Клиент':'Психолог'} ждёт ответа до ${date(pending.expires_at)}. Пока действует исходная встреча.</p></div>`:''}${controls?`<div class="save-row">${controls}</div>`:''}${role === 'psychologist' && item.status === 'confirmed' && future ? `<div data-video-editor hidden><label>Ссылка HTTPS<input type="url" maxlength="2048" value="${escape(item.video_url)}"></label><button type="button" class="primary" data-booking-action="save-video-link">Сохранить ссылку</button></div>` : ''}<div data-change-form></div>${history?`<details><summary>История изменений</summary><ul class="history">${history}</ul></details>`:''}</article>`;
+      return `<article class="appointment-card" ${attributes}><h3>${escape(role === 'client' ? item.psychologist_name : item.client_name)}</h3>${role==='admin'?`<p>Психолог: ${escape(item.psychologist_name)}</p>`:''}<p>${date(item.start_at)} · 50 минут</p><p>${escape(item.price)} ₽ · ${statuses[item.status] || escape(item.status)}</p>${item.status==='pending'?`<p class="micro">Ответ психолога до ${date(item.expires_at)}. Без подтверждения время освободится.</p>`:''}${item.status==='cancelled'?`<p class="micro">Отменил ${item.cancelled_by==='client'?'клиент':'психолог'}.</p>`:''}${pending?`<div class="notice"><b>Предложен перенос на ${date(pending.start_at)}</b><p>${pending.offered_by==='client'?'Клиент':'Психолог'} ждёт ответа до ${date(pending.expires_at)}. Пока действует исходная встреча.</p></div>`:''}${outcomePanel(item,role)}${controls?`<div class="save-row">${controls}</div>`:''}${role === 'psychologist' && item.status === 'confirmed' && future ? `<div data-video-editor hidden><label>Ссылка HTTPS<input type="url" maxlength="2048" value="${escape(item.video_url)}"></label><button type="button" class="primary" data-booking-action="save-video-link">Сохранить ссылку</button></div>` : ''}<div data-change-form></div>${history?`<details><summary>История изменений</summary><ul class="history">${history}</ul></details>`:''}</article>`;
     }).join('');
   }
   function bindActions(container, role, refresh, message, session=()=>()=>true) {
@@ -45,6 +54,17 @@ window.BookingUI = (() => {
       button.disabled = true;
       try {
         message('');
+        if(action==='save-outcome'){
+          const form=card.querySelector('[data-outcome]'),select=form.querySelector('select'),value=select.value;
+          if(!value){message('Выберите результат встречи.');select.focus();return;}
+          if(role==='admin'&&!confirm('Сохранить итог встречи? Его увидят оба участника.'))return;
+          if(form.dataset.submittedValue!==value){form.dataset.requestKey=crypto.randomUUID();form.dataset.submittedValue=value;}
+          select.disabled=true;
+          try{await api(base+'/outcome',{id:payload.id,revision:Number(form.dataset.outcomeRevision),value,request_key:form.dataset.requestKey});}
+          finally{select.disabled=false;}
+          if(!isCurrent())return;
+          message('Результат сохранён.');await refresh();return;
+        }
         if (action === 'video-link') {
           const field = card.querySelector('[data-video-editor]');
           field.hidden = !field.hidden;

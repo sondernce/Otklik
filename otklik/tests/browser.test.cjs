@@ -385,6 +385,7 @@ for(const role of ['client','psychologist']){
       await page.locator(role==='client'?'#client-auth-submit':'#auth-submit').click();
       await page.locator(role==='client'?'#client-workspace':'#workspace').waitFor({state:'visible'});
       release();await done;await page.evaluate(()=>window.pendingAppointmentRefresh);
+      if(role==='client')await page.locator('#client-next').getByText(/Найдите того/).waitFor();
       assert.equal(await cards.locator('[data-appointment]').count(),0,'Previous account appointments leaked into the new workspace');
       if(role==='client')assert.match(await page.locator('#client-next').innerText(),/Найдите того/);
       else assert.equal(await page.locator('#profile-form [name=name]').inputValue(),'');
@@ -543,4 +544,195 @@ test('client home opens its real meeting, keeps section on reload and validates 
   const anon=await browser.newContext();t.after(()=>anon.close());const page=await anon.newPage();
   await page.goto(origin+'/client');await page.locator('#client-auth-submit').click();
   for(const id of ['client-name','client-age','client-email','client-password'])assert.equal(await page.locator('#'+id).getAttribute('aria-invalid'),'true');
+});
+
+function localAccessLink(email,purpose){
+  const {execFileSync}=require('node:child_process');
+  const script=`import sys,re
+from pathlib import Path
+from email import policy
+from email.parser import BytesParser
+import database,mail_worker
+path=Path(sys.argv[1])
+with database.connect(path) as db:
+    row=(db.execute('SELECT mail_id FROM email_changes WHERE new_email=? ORDER BY created_at DESC LIMIT 1',(sys.argv[2],)) if sys.argv[3]=='change' else db.execute('SELECT mail_id FROM email_tokens WHERE email=? AND purpose=? ORDER BY created_at DESC LIMIT 1',(sys.argv[2],sys.argv[3]))).fetchone()
+    if row is None:raise RuntimeError('Missing test email')
+    ident=row['mail_id']
+mail_worker.run_once(path,limit=100)
+message=BytesParser(policy=policy.default).parsebytes((path.parent/'mail-preview'/(ident+'.eml')).read_bytes())
+print(re.search(r'http[^\\s]+/account-access#[^\\s]+',message.get_content()).group())`;
+  assert.ok(process.env.OTKLIK_TEST_DATABASE);
+  return execFileSync('python',['-B','-c',script,process.env.OTKLIK_TEST_DATABASE,email,purpose],{encoding:'utf8'}).trim();
+}
+
+test('client email confirmation uses a local message, keeps booking draft and requires explicit action',async t=>{
+  const f=await fixture(t);await bookingDraft(f);
+  const draft=await f.page.evaluate(()=>sessionStorage.getItem('otklik-booking-draft'));
+  const link=localAccessLink(f.email,'verify'),token=new URL(link).hash;
+  await f.page.goto(link);
+  assert.equal(new URL(f.page.url()).hash,'','Bearer secret must be removed from the visible URL');
+  assert.equal((await get(f.client,'/api/client/email/status')).email_verified,false);
+  await f.page.getByRole('button',{name:'Подтвердить почту',exact:true}).click();
+  await f.page.getByText('Почта подтверждена.',{exact:true}).waitFor();
+  assert.equal((await get(f.client,'/api/client/email/status')).email_verified,true);
+  assert.equal(await f.page.evaluate(()=>sessionStorage.getItem('otklik-booking-draft')),draft);
+  await f.page.goto(origin+'/client#settings');
+  await f.page.locator('#client-email-access').getByText('Электронная почта подтверждена.',{exact:true}).waitFor();
+  assert.ok(!(await f.page.content()).includes(token));
+});
+
+test('password recovery preserves fields and draft after lost reply and supports login with the new password',async t=>{
+  const f=await fixture(t);await bookingDraft(f);
+  const draft=await f.page.evaluate(()=>sessionStorage.getItem('otklik-booking-draft'));
+  await f.page.locator('#client-logout').click();await f.page.locator('#client-auth').waitFor({state:'visible'});
+  await f.page.getByRole('link',{name:'Забыли пароль?',exact:true}).click();
+  await f.page.locator('#access-email').fill(f.email);await f.page.getByRole('button',{name:'Получить ссылку',exact:true}).click();
+  await f.page.getByText(/Если аккаунт с такой почтой существует/).waitFor();
+  const link=localAccessLink(f.email,'reset');await f.page.goto(link);
+  await f.page.setViewportSize({width:390,height:844});
+  await f.page.locator('#access-reset').waitFor({state:'visible'});
+  assert.ok(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await capture(f.page,'password-recovery-mobile.png');
+  await f.page.locator('#access-password').fill('new-browser-password');await f.page.locator('#access-password-repeat').fill('different-password');
+  await f.page.getByRole('button',{name:'Сохранить новый пароль',exact:true}).click();
+  await f.page.getByText('Пароли должны совпадать.',{exact:true}).waitFor();
+  await f.page.locator('#access-password-repeat').fill('new-browser-password');
+  const route='**/api/client/password/reset';
+  let release,captured;
+  const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{captured=resolve;});
+  await f.page.route(route,async request=>{const response=await request.fetch();assert.equal(response.status(),200);captured();await gate;await request.abort('failed');});
+  try{
+    await f.page.getByRole('button',{name:'Сохранить новый пароль',exact:true}).click();await ready;
+    assert.equal(await f.page.locator('#access-password').isDisabled(),true,'Password must not change while the server processes the submitted value');
+  }finally{release();}
+  await f.page.waitForFunction(()=>document.getElementById('access-message').textContent.includes('Не удалось получить ответ'));
+  assert.equal(await f.page.locator('#access-password').inputValue(),'new-browser-password');
+  await f.page.unroute(route);
+  await f.page.getByRole('button',{name:'Сохранить новый пароль',exact:true}).click();
+  await f.page.getByText(/Если пароль уже меняли по этой ссылке/).waitFor();
+  await f.page.getByRole('link',{name:'Вернуться к входу',exact:true}).click();
+  await f.page.locator('#client-email').fill(f.email);await f.page.locator('#client-password').fill('new-browser-password');
+  await f.page.locator('#client-auth-submit').click();await f.page.locator('#client-workspace').waitFor({state:'visible'});
+  assert.equal(await f.page.evaluate(()=>sessionStorage.getItem('otklik-booking-draft')),draft);
+});
+
+test('psychologist can confirm email from local preview and refresh confirmation in settings',async t=>{
+  const f=await fixture(t);await f.psyPage.goto(origin+'/psychologist#settings');
+  const email=(await get(f.psy,'/api/psychologist/me')).email;
+  await f.psyPage.locator('#psychologist-email-access').getByText('Электронная почта пока не подтверждена.',{exact:true}).waitFor();
+  const link=localAccessLink(email,'verify'),confirmation=await f.psy.newPage();t.after(()=>confirmation.close());
+  await confirmation.goto(link);await confirmation.getByRole('button',{name:'Подтвердить почту',exact:true}).click();
+  await confirmation.getByText('Почта подтверждена.',{exact:true}).waitFor();
+  await f.psyPage.locator('#psychologist-email-access').getByRole('button',{name:'Обновить подтверждение',exact:true}).click();
+  await f.psyPage.locator('#psychologist-email-access').getByText('Электронная почта подтверждена.',{exact:true}).waitFor();
+  await f.psyPage.setViewportSize({width:390,height:844});
+  assert.ok(await f.psyPage.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+});
+
+test('account email change confirms the new address and ends sessions for both roles',async t=>{
+  const f=await fixture(t);
+  for(const [role,page,context] of [['client',f.page,f.client],['psychologist',f.psyPage,f.psy]]){
+    await page.goto(origin+'/'+role+'#settings');
+    const root=page.locator('#'+role+'-account-management');await root.getByText('Сменить почту',{exact:true}).click();
+    const form=root.locator('[data-account-email]'),newEmail=role+'-new-'+randomUUID()+'@test.invalid';
+    await form.locator('[name=email]').fill(newEmail);
+    await form.locator('[name=password]').fill(role==='client'?'test-client-password':'test-psychologist-password');
+    const route='**/api/'+role+'/account/email-change';let originalKey;
+    await page.route(route,async request=>{originalKey=request.request().postDataJSON().request_key;assert.equal((await request.fetch()).status(),200);await request.abort('failed');});
+    await form.getByRole('button').click();await form.getByText(/Не удалось получить ответ/).waitFor();
+    assert.ok(await form.locator('[name=password]').inputValue());
+    await page.unroute(route);await form.getByRole('button').click();await form.getByText(/Проверьте письмо на новом адресе/).waitFor();
+    await form.locator('[name=password]').fill(role==='client'?'test-client-password':'test-psychologist-password');
+    const sending=page.waitForRequest(request=>request.url().endsWith('/account/email-change'));
+    await form.getByRole('button').click();
+    assert.notEqual((await sending).postDataJSON().request_key,originalKey,'A new request after an acknowledged response must allow resending later');
+    await form.getByText(/Если адрес доступен/).waitFor();
+    const link=localAccessLink(newEmail,'change');await page.goto(link);
+    assert.equal(new URL(page.url()).hash,'');
+    await page.getByRole('button',{name:'Подтвердить новую почту',exact:true}).click();await page.getByText(/Адрес изменён/).waitFor();
+    assert.equal((await context.request.get(origin+'/api/'+role+'/me')).status(),401);
+    await page.getByRole('link',{name:'Вернуться к входу',exact:true}).click();
+    await page.locator(role==='client'?'#client-email':'#email').fill(newEmail);
+    await page.locator(role==='client'?'#client-password':'#password').fill(role==='client'?'test-client-password':'test-psychologist-password');
+    await page.locator(role==='client'?'#client-auth-submit':'#auth-submit').click();
+    await page.locator(role==='client'?'#client-workspace':'#workspace').waitFor({state:'visible'});
+    await page.goto(origin+'/'+role+'#settings');
+    await page.locator('#'+role+'-email-access').getByText('Электронная почта подтверждена.',{exact:true}).waitFor();
+  }
+});
+
+test('admin can block and unblock accounts and late account lists do not survive logout',async t=>{
+  const f=await fixture(t),page=await admin.newPage();t.after(()=>page.close());
+  await page.goto(origin+'/admin#admin-accounts');
+  const root=page.locator('#admin-accounts');await root.locator('[name=search]').fill(f.email);await root.getByRole('button',{name:'Найти аккаунты',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('#admin-accounts article').length===1);
+  await page.setViewportSize({width:390,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await capture(page,'admin-accounts-mobile.png');
+  page.on('dialog',dialog=>dialog.accept());
+  await root.getByRole('button',{name:'Заблокировать аккаунт',exact:true}).click();
+  await root.getByRole('button',{name:'Разблокировать аккаунт',exact:true}).waitFor();
+  assert.equal((await f.client.request.get(origin+'/api/client/me')).status(),401);
+  await root.getByRole('button',{name:'Разблокировать аккаунт',exact:true}).click();
+  await root.getByRole('button',{name:'Заблокировать аккаунт',exact:true}).waitFor();
+  assert.equal((await f.client.request.get(origin+'/api/client/me')).status(),401);
+  await post(f.client,'/api/client/login',{email:f.email,password:'test-client-password'});
+  let release,captured;const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{captured=resolve;});
+  await page.route('**/api/admin/accounts?*',async route=>{const response=await route.fetch();captured();await gate;await route.fulfill({response});});
+  await root.getByRole('button',{name:'Найти аккаунты',exact:true}).click();await ready;
+  await page.locator('#logout').click();await page.locator('#auth').waitFor({state:'visible'});release();
+  await page.waitForTimeout(100);assert.equal(await root.locator('[data-account-list]').textContent(),'');
+  await page.unroute('**/api/admin/accounts?*');await post(admin,'/api/login',{password:'test-admin-password'});
+});
+
+test('account deletion requires cancelling meetings and retains conversation history',async t=>{
+  const f=await fixture(t),item=await confirmed(f);
+  await post(f.client,'/api/client/messages',{appointment_id:item.id,body:'История сохраняется после удаления',request_key:randomUUID()});
+  await f.page.goto(origin+'/client#settings');await f.page.setViewportSize({width:390,height:844});
+  const root=f.page.locator('#client-account-management');await root.locator('summary').getByText('Удалить аккаунт',{exact:true}).click();
+  const form=root.locator('[data-account-delete]');
+  await form.locator('[name=password]').fill('test-client-password');await form.locator('[name=confirmation]').fill('УДАЛИТЬ');
+  assert.ok(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await capture(f.page,'account-deletion-mobile.png');
+  await form.getByRole('button',{name:'Удалить аккаунт',exact:true}).click();await form.getByText(/Сначала отмените будущие встречи/).waitFor();
+  const actual=(await get(f.client,'/api/client/appointments')).appointments.find(x=>x.id===item.id);
+  await post(f.client,'/api/client/appointments/cancel',{id:item.id,revision:actual.revision});
+  await form.getByRole('button',{name:'Удалить аккаунт',exact:true}).click();await f.page.locator('#client-auth').waitFor({state:'visible'});
+  assert.equal((await f.client.request.get(origin+'/api/client/me')).status(),401);
+  assert.equal(await form.locator('[name=password]').inputValue(),'');
+  const history=await get(f.psy,'/api/psychologist/messages?appointment_id='+item.id);
+  assert.equal(history.messages[0].body,'История сохраняется после удаления');
+});
+
+function finishTestMeeting(id){
+  const {execFileSync}=require('node:child_process');
+  assert.ok(process.env.OTKLIK_TEST_DATABASE);
+  execFileSync('python',['-B','-c',`import sys,database
+with database.connect(sys.argv[1]) as db:
+    db.execute("UPDATE appointments SET start_at='2000-01-01T12:00:00+00:00',end_at='2000-01-01T12:50:00+00:00' WHERE id=?",(sys.argv[2],))`,process.env.OTKLIK_TEST_DATABASE,id]);
+}
+
+test('meeting outcomes retain a lost response, flag disagreement and allow admin resolution',async t=>{
+  const f=await fixture(t),item=await confirmed(f);finishTestMeeting(item.id);
+  await f.page.goto(origin+'/client#meetings');
+  const card=f.page.locator('[data-appointment="'+item.id+'"]');
+  await card.locator('[data-outcome-value]').selectOption('held');
+  const route='**/api/client/appointments/outcome';
+  await f.page.route(route,async request=>{assert.equal((await request.fetch()).status(),200);await request.abort('failed');});
+  await card.getByRole('button',{name:'Сохранить ответ о встрече',exact:true}).click();await f.page.getByText(/Не удалось получить ответ/).waitFor();
+  assert.equal(await card.locator('[data-outcome-value]').inputValue(),'held');
+  await f.page.unroute(route);await card.getByRole('button',{name:'Сохранить ответ о встрече',exact:true}).click();
+  await card.getByText('Ожидается ответ второй стороны',{exact:true}).waitFor();
+  await f.psyPage.goto(origin+'/psychologist#overview');const psyCard=f.psyPage.locator('[data-appointment="'+item.id+'"]');
+  await psyCard.locator('[data-outcome-value]').selectOption('client_absent');await psyCard.getByRole('button',{name:'Сохранить ответ о встрече',exact:true}).click();
+  await psyCard.getByText('Ответы различаются, требуется разбор администратора',{exact:true}).waitFor();
+  const page=await admin.newPage();t.after(()=>page.close());await page.goto(origin+'/admin#admin-appointments');
+  await page.locator('#admin-outcome-filter').selectOption('disputed');
+  const adminCard=page.locator('[data-appointment="'+item.id+'"]');await adminCard.locator('[data-outcome-value]').selectOption('held');
+  page.on('dialog',dialog=>dialog.accept());await adminCard.getByRole('button',{name:'Сохранить итог администратора',exact:true}).click();
+  await adminCard.waitFor({state:'detached'});
+  await f.page.reload();await card.getByText('Результат определён администратором: Встреча состоялась',{exact:true}).waitFor();
+  assert.equal(await card.locator('[data-outcome-value]').count(),0);
+  await f.page.setViewportSize({width:390,height:844});assert.ok(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  await capture(f.page,'meeting-outcome-mobile.png');
 });

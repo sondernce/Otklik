@@ -19,7 +19,7 @@ EVENTS = {'startup_ready','startup_failed','startup_stopped','http_database_erro
           'security_login_failed','security_limited','security_denied'}
 OPERATIONS={'login','registration','profiles','appointments','support','notifications','messages','monitoring','other'}
 FILES = {'server.py','database.py','access.py','booking.py','communications.py','notifications.py',
-         'client_profiles.py','video_links.py','publications.py','timestamps.py','diagnostics.py','admin_monitor.py','maintenance.py'}
+         'client_profiles.py','video_links.py','publications.py','timestamps.py','diagnostics.py','admin_monitor.py','maintenance.py','accounts.py','outcomes.py','email_access.py','mail_queue.py','mail_worker.py'}
 ERRORS = {'RuntimeError','ValueError','TypeError','OSError','PermissionError','FileNotFoundError',
           'NotADirectoryError','IsADirectoryError','OperationalError','DatabaseError','IntegrityError',
           'UnsupportedSchema','BrokenPipeError','ConnectionResetError','TimeoutError'}
