@@ -2,10 +2,10 @@
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-PAGES = {'/': 'index.html', '/admin': 'admin.html', '/account-access':'account-access.html', '/psychologist': 'psychologist.html', '/client': 'client.html'}
-HTML = {'account-access.html','index.html', 'admin.html', 'psychologist.html', 'client.html', 'documents.html'}
-JS = {'account-management.js','email-access-ui.js','account-access.js','admin-monitor.js', 'http.js', 'app.js', 'admin.js', 'psychologist.js', 'client.js', 'client-home.js', 'booking-ui.js', 'communications-ui.js', 'form-errors.js'}
-CSS = {'styles.css', 'admin.css', 'client.css', 'dashboard.css', 'psychologist.css'}
+PAGES = {'/registration':'registration.html','/': 'index.html', '/admin': 'admin.html', '/account-access':'account-access.html', '/psychologist': 'psychologist.html', '/client': 'client.html'}
+HTML = {'registration.html','account-access.html','index.html', 'admin.html', 'psychologist.html', 'client.html', 'documents.html'}
+JS = {'registration.js','account-management.js','email-access-ui.js','account-access.js','admin-monitor.js', 'http.js', 'app.js', 'admin.js', 'psychologist.js', 'client.js', 'client-home.js', 'booking-ui.js', 'communications-ui.js', 'form-errors.js'}
+CSS = {'registration.css','styles.css', 'admin.css', 'client.css', 'dashboard.css', 'psychologist.css'}
 MIME = {'.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.jpeg': 'image/jpeg', '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp'}
 
 

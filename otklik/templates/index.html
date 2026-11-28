@@ -7,21 +7,23 @@
   <title>Отклик — начните с человека, который вам подходит</title>
   <meta name="description" content="Локальный прототип подбора психолога: предпочтения, рекомендации и пробная запись.">
   <link rel="stylesheet" href="/static/css/styles.css">
-  <script defer src="/static/js/http.js"></script><script defer src="/static/js/app.js"></script>
+  <script defer src="/static/js/catalog-options.js"></script><script defer src="/static/js/http.js"></script><script defer src="/static/js/app.js"></script>
 </head>
 <body>
 
+  <div class="site-header-shell">
   <header class="header wrap">
     <a class="brand" href="#" aria-label="Отклик — на главную"><span class="logo-window" aria-hidden="true"><img src="assets/brand/otklik-original.jpeg" alt=""></span><span class="wordmark">отклик</span></a>
     <nav aria-label="Основная навигация"><a href="#topics">С чем начать</a><a href="#how">Как это работает</a><a href="#questions">Вопросы</a><a href="/psychologist">Я психолог</a><a href="/client">Мои встречи</a></nav>
     <div class="header-actions"><span class="prototype">Демо</span><button class="primary header-cta" data-start>Подобрать психолога <span aria-hidden="true">↗</span></button></div>
   </header>
+  </div>
   <main id="main">
     <section id="home" class="wrap">
       <div class="hero">
         <div class="hero-copy">
           <p class="eyebrow"><span></span> Психолог ближе, чем кажется</p>
-          <h1>Найдите того,<br>с кем можно<br><em>быть собой.</em></h1>
+          <h1 aria-label="Найдите того, с кем можно быть собой.">Найдите того,<br>с кем можно<br><em class="hero-phrases" aria-hidden="true"><span class="is-active">быть собой.</span><span>поговорить.</span><span>найти себя.</span><span>быть честным.</span></em></h1>
           <p class="hero-description">Подбор психолога для онлайн-встреч.<br>Начните с короткой анкеты — мы поможем<br class="desktop"> сориентироваться в выборе.</p>
           <button class="primary" data-start>Подобрать психолога <span aria-hidden="true">↗</span></button>
           <div class="hero-facts"><span><b>5</b> коротких вопросов</span><span><b>50</b> минут на встречу</span></div><p class="micro">Подбор без регистрации · видеовстречи</p><a class="hero-psychologist" href="/psychologist#register">Вы психолог? <span>Присоединиться ↗</span></a>

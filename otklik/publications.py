@@ -3,7 +3,7 @@ import json
 
 from timestamps import now
 
-PUBLIC_FIELDS = {'id', 'name', 'initials', 'gender', 'price', 'experience', 'topics', 'style', 'approach', 'bio', 'photo', 'education'}
+PUBLIC_FIELDS = {'id', 'name', 'initials', 'gender', 'price', 'experience', 'age', 'topics', 'style', 'approach', 'bio', 'photo', 'education'}
 
 
 def publish(db, profile):

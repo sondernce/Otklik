@@ -1,0 +1,23 @@
+'use strict';
+(() => {
+ const role=new URLSearchParams(location.hash.slice(1)).get('role')==='psychologist'?'psychologist':'client';
+ const $=id=>document.getElementById(id),api=(action,data)=>HttpAPI.request('/api/'+role+'/registration/'+action,data);
+ let state=null,busy=false,epoch=0;
+ $('registration-back').href='/'+role+'#register';
+ if(role==='psychologist')document.querySelector('.registration-footnote').textContent='После подтверждения вы сможете заполнить анкету психолога и отправить её на рассмотрение.';
+ function timer(){if(!state)return;const left=Math.max(0,Math.ceil(state.resend_at-Date.now()/1000));$('registration-timer').textContent=left?'Запросить код повторно можно через '+left+' сек.':'Не нашли письмо? Проверьте папку «Спам» или запросите новый код.';$('registration-resend').disabled=busy||left>0;}
+ function lock(value){busy=value;document.querySelectorAll('#registration-content button').forEach(b=>b.disabled=value);document.querySelectorAll('#registration-content input').forEach(i=>i.readOnly=value);$('registration-confirm').textContent=value?'Подождите…':'Подтвердить и создать аккаунт';timer();}
+ function render(data){state=data;$('registration-local-note').hidden=data.transport!=='local'||data.completed;$('registration-content').hidden=data.completed;$('registration-hint').textContent=data.completed?'Аккаунт уже создан. Войдите с паролем, который указали при регистрации.':'Введите код подтверждения для регистрации на адрес';$('registration-email').textContent=data.email;$('registration-new-email').value=data.email;if(data.completed){$('registration-back').textContent='Перейти ко входу';$('registration-back').href='/'+role+'#login';}timer();}
+ function destination(){let draft=false;try{draft=role==='client'&&!!sessionStorage.getItem('otklik-booking-draft');}catch{}return '/'+role+(draft?'#book':'#overview');}
+ function failure(error,field){if(field&&(!error.field||error.field===field))FormErrors.show({[field==='code'?'#registration-code':'#registration-new-email']:error.message});else $('registration-status').textContent=error.message;}
+ async function load(){const current=++epoch;try{const data=await api('status');if(current!==epoch)return;render(data);if(!data.completed)$('registration-code').focus();}catch(error){if(current!==epoch)return;$('registration-hint').textContent='Не удалось загрузить подтверждение';$('registration-status').textContent=error.message;}}
+ $('registration-form').addEventListener('submit',async event=>{event.preventDefault();if(busy)return;FormErrors.clear();const code=$('registration-code').value.trim();if(!/^[0-9]{6}$/.test(code)){FormErrors.show({'#registration-code':'Введите шестизначный код из письма.'});return;}lock(true);$('registration-status').textContent='';const current=epoch;try{await api('confirm',{code});if(current===epoch)location.assign(destination());}catch(error){if(current!==epoch)return;if(error.status===409){$('registration-status').textContent=error.message;$('registration-back').textContent='Перейти ко входу';$('registration-back').href='/'+role+'#login';}else failure(error,'code');}finally{if(current===epoch)lock(false);}});
+ async function resend(email){if(busy)return;lock(true);FormErrors.clear();$('registration-status').textContent='';const current=epoch;try{const data=await api(email===undefined?'resend':'change-email',email===undefined?{}:{email});if(current!==epoch)return;render(data);$('registration-email-form').hidden=true;$('registration-code').value='';$('registration-status').textContent='Новый код подготовлен. Используйте последнее письмо.';$('registration-code').focus();}catch(error){if(current===epoch)failure(error,email===undefined?null:'email');}finally{if(current===epoch)lock(false);}}
+ $('registration-resend').addEventListener('click',()=>resend());
+ $('registration-edit').addEventListener('click',()=>{if(busy)return;FormErrors.clear();$('registration-email-form').hidden=false;$('registration-new-email').focus();});
+ $('registration-cancel-edit').addEventListener('click',()=>{$('registration-email-form').hidden=true;FormErrors.clear();});
+ $('registration-email-form').addEventListener('submit',event=>{event.preventDefault();const input=$('registration-new-email');if(!input.value||!input.validity.valid){FormErrors.show({'#registration-new-email':'Введите корректную почту.'});return;}resend(input.value.trim());});
+ window.addEventListener('pagehide',()=>{epoch++;clearInterval(interval);});
+ window.addEventListener('pageshow',event=>{if(event.persisted){lock(false);clearInterval(interval);interval=setInterval(timer,1000);load();}});
+ let interval=setInterval(timer,1000);load();
+})();

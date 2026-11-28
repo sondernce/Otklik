@@ -149,9 +149,14 @@ raise SystemExit(1)
         self.assertEqual(self.request('admin','POST','/api/login',{'password':'test-admin-password'})[0],200)
 
     def test_failed_session_write_rolls_back_registration(self):
-        with patch.object(server.diagnostics,'record'), patch.object(access,'issue',side_effect=RuntimeError('simulated storage failure')):
-            self.assertEqual(self.request('new','POST','/api/psychologist/register',{'email':'new@test.invalid','password':'test-psychologist-password'})[0],500)
+        self.assertEqual(self.request('new','POST','/api/psychologist/register',{'email':'new@test.invalid','password':'test-psychologist-password'})[0],200)
+        import re
+        with server.connection() as db:
+            body=db.execute('SELECT q.body FROM pending_registrations p JOIN mail_outbox q ON q.id=p.mail_id').fetchone()[0]
+        code=re.search(r'Код подтверждения: (\d{6})',body)[1]
+        with patch.object(server.diagnostics,'record'),patch.object(access,'issue',side_effect=RuntimeError('simulated storage failure')):
+            self.assertEqual(self.request('new','POST','/api/psychologist/registration/confirm',{'code':code})[0],500)
         with server.connection() as db:
             self.assertEqual(db.execute('SELECT count(*) FROM psychologists').fetchone()[0],0)
             self.assertEqual(db.execute('SELECT count(*) FROM profiles').fetchone()[0],0)
-        self.assertEqual(self.request('new','POST','/api/psychologist/register',{'email':'new@test.invalid','password':'test-psychologist-password'})[0],200)
+        self.assertEqual(self.request('new','POST','/api/psychologist/registration/confirm',{'code':code})[0],200)

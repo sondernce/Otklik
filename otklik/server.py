@@ -24,13 +24,15 @@ import database
 import diagnostics
 import admin_monitor
 import email_access
+import registration
+import catalog_options
 import accounts
 import outcomes
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get('OTKLIK_DB', ROOT / '.local' / 'otklik.sqlite3'))
 PORT = 4173
-TOPICS = {'anxiety', 'relationships', 'self', 'burnout'}
+TOPICS = set(catalog_options.TOPICS)
 
 
 def connection():
@@ -64,6 +66,9 @@ def validate(data):
     if type(experience) is not int or not 0 <= experience <= 70:
         raise ValueError('Опыт должен быть от 0 до 70 лет.')
     p['experience'] = experience
+    age=data.get('age')
+    if age is not None and (type(age) is not int or not 18<=age<=100):raise ValueError('Укажите возраст психолога от 18 до 100 лет или оставьте поле пустым.')
+    p['age']=age
     topics = data.get('topics')
     if not isinstance(topics, list) or not topics or any(t not in TOPICS for t in topics):
         raise ValueError('Выберите хотя бы одну тему работы.')
@@ -237,6 +242,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def get_request(self):
         path = urlsplit(self.path).path
+        if path == '/static/js/catalog-options.js':
+            return self.send(200,('window.CatalogOptions='+json.dumps(catalog_options.public(),ensure_ascii=False)+';').encode(),content_type='text/javascript; charset=utf-8')
+        if path in ('/api/client/registration/status','/api/psychologist/registration/status'):
+            return self.registration_request(path)
         if path == '/api/admin/accounts':
             if not self.authorized():return self.send(401,{'error':'Войдите в кабинет администратора.'})
             with connection() as db:result=accounts.listing(db,{k:v[0] for k,v in parse_qs(urlsplit(self.path).query).items()})
@@ -330,6 +339,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.account_request(path,data)
             if path in {f'/api/{role}/{endpoint}' for role in ('client','psychologist') for endpoint in ('email/request-verification','email/confirm','password/request-reset','password/reset')}:
                 return self.email_request(path,data)
+            if path in {f'/api/{role}/register' for role in ('client','psychologist')} or path in {f'/api/{role}/registration/{action}' for role in ('client','psychologist') for action in ('confirm','resend','change-email')}:
+                return self.registration_request(path,data)
             if path.startswith('/api/client/'):
                 return self.client_request(path, data)
             if path.startswith('/api/psychologist/appointments/') and path != '/api/psychologist/appointments/decision':
@@ -378,35 +389,16 @@ class Handler(BaseHTTPRequestHandler):
                             return self.send(401, {'error': 'Неверный пароль.'})
                     token = access.issue(db, 'admin', previous=access.token(self.headers.get('Cookie', ''), 'admin'))
                 return self.send(200, {'ok': True}, access.cookie('admin', token))
-            if path in {'/api/psychologist/register', '/api/psychologist/login'}:
-                self.check_login_limit('psychologist', data.get('email'), path.endswith('/register'))
-                email, password = data.get('email', ''), data.get('password', '')
-                if not isinstance(email, str) or not isinstance(password, str):
-                    raise ValueError('Проверьте почту и пароль.')
-                email = email.strip().lower()
-                if len(email) > 200 or email.count('@') != 1 or '.' not in email.split('@')[-1] or any(c.isspace() for c in email):
-                    raise ValueError('Введите корректную электронную почту.')
-                if not 8 <= len(password) <= 200:
-                    raise ValueError('Пароль должен содержать от 8 до 200 символов.')
+            if path == '/api/psychologist/login':
+                self.check_login_limit('psychologist',data.get('email'))
+                email=email_access.normalize_email(data.get('email'));original=data['email'].strip().lower();password=data.get('password')
+                if not isinstance(password,str) or not 8<=len(password)<=200:raise ValueError('Пароль должен содержать от 8 до 200 символов.')
                 with connection() as db:
-                    if path.endswith('/register'):
-                        owner, salt = secrets.token_hex(12), secrets.token_hex(16)
-                        try:
-                            db.execute('INSERT INTO psychologists VALUES (?,?,?,?)', (owner, email, salt, password_hash(password, salt)))
-                        except sqlite3.IntegrityError:
-                            return self.send(409, {'error': 'Эта почта уже зарегистрирована. Войдите в кабинет.'})
-                        p = dict(id=secrets.token_hex(12), owner_id=owner, email=email, contact='', status='draft', name='', gender='female', price=3000, experience=0, style='gentle', approach='', bio='', education='', topics=[], photo='', slots=[], hidden=False, deleted=False, revision=0, history=[])
-                        event(p, 'Регистрация', 'Психолог')
-                        save_record(db, p)
-                    else:
-                        row = db.execute('SELECT id,salt,hash FROM psychologists WHERE email=?', (email,)).fetchone()
-                        if not row or not hmac.compare_digest(row[2], password_hash(password, row[1])):
-                            return self.send(401, {'error': 'Неверная почта или пароль.'})
-                        owner = row[0]
-                    if path.endswith('/register'):
-                        email_access.issue(db,'psychologist',{'id':owner,'email':email},'verify',self.email_origin())
-                    token = access.issue(db, 'psychologist', owner, access.token(self.headers.get('Cookie', ''), 'psychologist'))
-                return self.send(200, {'ok': True}, access.cookie('psychologist', token))
+                    row=db.execute('SELECT id,salt,hash FROM psychologists WHERE email=?',(original,)).fetchone() or db.execute('SELECT id,salt,hash FROM psychologists WHERE email=?',(email,)).fetchone()
+                    if not row or not hmac.compare_digest(row['hash'],password_hash(password,row['salt'])):
+                        return self.send(401,{'error':'Неверная почта или пароль.'})
+                    token=access.issue(db,'psychologist',row['id'],access.token(self.headers.get('Cookie',''),'psychologist'))
+                return self.send(200,{'ok':True},access.cookie('psychologist',token))
             if path.startswith('/api/psychologist/'):
                 owner = self.psychologist()
                 if not owner:
@@ -426,7 +418,7 @@ class Handler(BaseHTTPRequestHandler):
                     if path.endswith('/profile'):
                         if p['status'] == 'pending':
                             return self.send(409, {'error': 'Анкета на рассмотрении. Дождитесь решения администратора.'})
-                        fields = {'name', 'gender', 'price', 'experience', 'style', 'approach', 'bio', 'education', 'topics', 'photo', 'contact', 'education'}
+                        fields = {'name', 'gender', 'price', 'experience', 'age', 'style', 'approach', 'bio', 'education', 'topics', 'photo', 'contact', 'education'}
                         supplied = {k: v for k, v in data.items() if k in fields}
                         proposed = p | supplied
                         # Drafts can be incomplete; validate a completed substitute for shape and limits.
@@ -504,8 +496,8 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         if p['deleted']:
                             return self.send(409, {'error': 'Сначала восстановите профиль из архива.'})
-                        clean = validate(p | {k: data[k] for k in ['name','bio','approach','education','gender','style','price','experience','topics','photo'] if k in data} | {'slots': [], 'published': False})
-                        p.update({k: clean[k] for k in ['name','bio','approach','education','gender','style','price','experience','topics','photo','initials']})
+                        clean = validate(p | {k: data[k] for k in ['name','bio','approach','education','gender','style','price','experience','age','topics','photo'] if k in data} | {'slots': [], 'published': False})
+                        p.update({k: clean[k] for k in ['name','bio','approach','education','gender','style','price','experience','age','topics','photo','initials']})
                         event(p, 'Профиль отредактирован', 'Администратор')
                         if p['status'] == 'approved':
                             booking.publish(db, p)
@@ -527,7 +519,7 @@ class Handler(BaseHTTPRequestHandler):
                     text = text.replace(f'«{key}»', f'«{label}»')
                     break
             if not field:
-                for fragment, key in [('Цена','price'), ('Опыт','experience'), ('тему','topics'), ('фото','photo'), ('фото','photo'), ('Пароль','password'), ('почту','email'), ('Контакт','contact'), ('слот','slots'), ('Слоты','slots')]:
+                for fragment, key in [('Имя','name'), ('возраст','age'), ('Цена','price'), ('Опыт','experience'), ('тему','topics'), ('фото','photo'), ('фото','photo'), ('Пароль','password'), ('почту','email'), ('Контакт','contact'), ('слот','slots'), ('Слоты','slots')]:
                     if fragment in text:
                         field = key
                         break
@@ -547,38 +539,16 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
     def client_request(self, path, data):
-        if path in {'/api/client/register', '/api/client/login'}:
-            self.check_login_limit('client', data.get('email'), path.endswith('/register'))
-            email, password = data.get('email'), data.get('password')
-            if not isinstance(email, str) or len(email) > 200 or email.count('@') != 1 or '.' not in email.split('@')[-1] or any(c.isspace() for c in email):
-                raise ValueError('Введите корректную электронную почту.')
-            if not isinstance(password, str) or not 8 <= len(password) <= 200:
-                raise ValueError('Пароль должен содержать от 8 до 200 символов.')
-            email = email.strip().lower()
+        if path == '/api/client/login':
+            self.check_login_limit('client',data.get('email'))
+            email=email_access.normalize_email(data.get('email'));original=data['email'].strip().lower();password=data.get('password')
+            if not isinstance(password,str) or not 8<=len(password)<=200:raise ValueError('Пароль должен содержать от 8 до 200 символов.')
             with connection() as db:
-                if path.endswith('/register'):
-                    name = data.get('name')
-                    if not isinstance(name, str) or not 2 <= len(name.strip()) <= 100:
-                        raise ValueError('Имя должно содержать от 2 до 100 символов.')
-                    age = data.get('age')
-                    if age is not None:
-                        client_profiles.validate_age(age)
-                    ident, salt = secrets.token_hex(12), secrets.token_hex(16)
-                    try:
-                        db.execute('INSERT INTO clients VALUES(?,?,?,?,?)', (ident, email, name.strip(), salt, password_hash(password, salt)))
-                    except sqlite3.IntegrityError:
-                        return self.send(409, {'error': 'Эта почта уже зарегистрирована. Войдите в кабинет.'})
-                else:
-                    row = db.execute('SELECT id,salt,hash FROM clients WHERE email=?', (email,)).fetchone()
-                    if not row or not hmac.compare_digest(row['hash'], password_hash(password, row['salt'])):
-                        return self.send(401, {'error': 'Неверная почта или пароль.'})
-                    ident = row['id']
-                if path.endswith('/register') and age is not None:
-                    db.execute('INSERT INTO client_details VALUES (?,?)', (ident, age))
-                if path.endswith('/register'):
-                    email_access.issue(db,'client',{'id':ident,'email':email},'verify',self.email_origin())
-                token = access.issue(db, 'client', ident, access.token(self.headers.get('Cookie', ''), 'client'))
-            return self.send(200, {'ok': True}, access.cookie('client', token))
+                row=db.execute('SELECT id,salt,hash FROM clients WHERE email=?',(original,)).fetchone() or db.execute('SELECT id,salt,hash FROM clients WHERE email=?',(email,)).fetchone()
+                if not row or not hmac.compare_digest(row['hash'],password_hash(password,row['salt'])):
+                    return self.send(401,{'error':'Неверная почта или пароль.'})
+                token=access.issue(db,'client',row['id'],access.token(self.headers.get('Cookie',''),'client'))
+            return self.send(200,{'ok':True},access.cookie('client',token))
         client = self.client()
         if not client:
             return self.send(401, {'error': 'Войдите в кабинет клиента.'})
@@ -610,6 +580,17 @@ class Handler(BaseHTTPRequestHandler):
         with connection() as db:
             result=accounts.erase(db,role,actor,data) if action=='delete' else accounts.request_change(db,role,actor,data,self.client_address[0],self.email_origin())
         return self.send(200,result,access.cookie(role,clear=True) if action=='delete' else None)
+
+    def registration_request(self,path,data=None):
+        role=path.split('/')[2];action=path.rsplit('/',1)[-1]
+        key=registration.token(self.headers.get('Cookie',''),role)
+        if action=='register':self.check_login_limit(role,data.get('email'),True)
+        with connection() as db:
+            if action=='register':code,result,cookie=registration.start(db,role,data,self.client_address[0],self.email_origin())
+            elif action=='status':code,result,cookie=registration.status(db,role,key)
+            elif action=='confirm':code,result,cookie=registration.confirm(db,role,key,data.get('code'),access.token(self.headers.get('Cookie',''),role))
+            else:code,result,cookie=registration.update(db,role,key,self.client_address[0],self.email_origin(),data.get('email') if action=='change-email' else None)
+        return self.send(code,result,cookie)
 
     def email_origin(self):
         # Only the exact local origins already accepted by do_POST are reusable.

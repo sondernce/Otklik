@@ -11,6 +11,7 @@ const notices=CommunicationUI.mountNotifications(find('client-notifications'),'c
   if(item.kind==='appointment_message'){chat.open(item.target_id,'Переписка по встрече');find('client-chat').scrollIntoView({block:'nearest'});}
   else {const card=find('client-appointments').querySelector(`[data-appointment="${CSS.escape(item.target_id)}"]`);if(!card)throw Error('Встреча не найдена. Обновите кабинет.');card.tabIndex=-1;card.focus();card.scrollIntoView({block:'nearest'});}
 });
+let registrationKey=crypto.randomUUID();
 let mode = 'register', user = null, draft = null, sessionEpoch=0, appointmentLoad=0;
 function currentSession(){const epoch=sessionEpoch;return()=>epoch===sessionEpoch&&user!==null;}
 function clearWorkspace(){
@@ -79,6 +80,7 @@ async function boot() {
 }
 find('client-register-tab').addEventListener('click', () => switchMode('register'));
 find('client-login-tab').addEventListener('click', () => switchMode('login'));
+find('client-auth-form').addEventListener('input',()=>{registrationKey=crypto.randomUUID();});
 find('client-auth-form').addEventListener('submit', async event => {
   event.preventDefault();
   const form=event.currentTarget;FormErrors.clear(form);const errors={};
@@ -88,15 +90,17 @@ find('client-auth-form').addEventListener('submit', async event => {
   if(find('client-password').value.length<8)errors['#client-password']='Пароль должен содержать от 8 символов.';
   if(FormErrors.show(errors))return;
   const epoch=++sessionEpoch;
-  const button = find('client-auth-submit'); button.disabled = true; message();
+  const button = find('client-auth-submit'); button.disabled = true;
+  form.querySelectorAll('input').forEach(input=>input.readOnly=true);find('client-register-tab').disabled=find('client-login-tab').disabled=true;message();
   try {
-    await ui.api(`/api/client/${mode}`, {name:find('client-name').value,email:find('client-email').value,password:find('client-password').value,...(mode === 'register' ? {age:Number(find('client-age').value)} : {})});
+    const result=await ui.api(`/api/client/${mode}`, {name:find('client-name').value,email:find('client-email').value,password:find('client-password').value,...(mode === 'register' ? {age:Number(find('client-age').value),request_key:registrationKey} : {})});
     if(epoch!==sessionEpoch)return;
     find('client-password').value = '';
+    if(result.verification_required){location.assign('/registration#role=client');return;}
     CommunicationUI.reset('client');
     if(!await boot())return;
     if (draft) {message('Вы вошли. Проверьте время и отправьте заявку.'); find('book').focus();}
-  } catch (error) {if(epoch===sessionEpoch){const fields={name:'#client-name',age:'#client-age',email:'#client-email',password:'#client-password'};if(error.field&&fields[error.field])FormErrors.show({[fields[error.field]]:error.message});else if(error.status===409)FormErrors.show({'#client-email':error.message});else if(error.status===401)FormErrors.show({'#client-email':'Проверьте почту.','#client-password':error.message});else message(error.message);}} finally {button.disabled = false;}
+  } catch (error) {if(epoch===sessionEpoch){const fields={name:'#client-name',age:'#client-age',email:'#client-email',password:'#client-password'};if(error.field&&fields[error.field])FormErrors.show({[fields[error.field]]:error.message});else if(error.status===409)FormErrors.show({'#client-email':error.message});else if(error.status===401)FormErrors.show({'#client-email':'Проверьте почту.','#client-password':error.message});else message(error.message);}} finally {button.disabled = false;form.querySelectorAll('input').forEach(input=>input.readOnly=false);find('client-register-tab').disabled=find('client-login-tab').disabled=false;}
 });
 find('book').addEventListener('click', async () => {
   if (!draft) return;

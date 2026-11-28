@@ -31,6 +31,7 @@ class BookingTest(unittest.TestCase):
     def client(self, who='client'):
         code, body = self.request(who, 'POST', '/api/client/register', {'email': who+'@test.invalid', 'name': 'Клиент '+who, 'password': 'client-password'})
         self.assertEqual(code, 200, body)
+        test_server.complete_registration(self,who,'client',who+'@test.invalid')
         return self.request(who, 'GET', '/api/client/me')[1]['client']
 
     def book(self, p, who='client', key='one-booking-request'):

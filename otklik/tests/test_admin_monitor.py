@@ -139,8 +139,12 @@ class MonitorTest(unittest.TestCase):
         with server.connection() as db:self.assertEqual(db.execute('SELECT count(*) FROM profile_publications').fetchone()[0],0)
 
     def test_registration_rollback_does_not_leave_registry_or_audit(self):
+        self.assertEqual(self.request('client','POST','/api/client/register',{'name':'Клиент','email':'x@test.invalid','password':'test-password'})[0],200)
+        import re
+        with server.connection() as db:body=db.execute('SELECT q.body FROM pending_registrations p JOIN mail_outbox q ON q.id=p.mail_id').fetchone()[0]
+        code=re.search(r'Код подтверждения: (\d{6})',body)[1]
         with patch.object(server.access,'issue',side_effect=RuntimeError('PRIVATE-ERROR')):
-            self.assertEqual(self.request('client','POST','/api/client/register',{'name':'Клиент','email':'x@test.invalid','password':'test-password'})[0],500)
+            self.assertEqual(self.request('client','POST','/api/client/registration/confirm',{'code':code})[0],500)
         data=self.overview();self.assertEqual(data['users']['total'],0)
         self.assertEqual(data['users']['registrations']['client'],0)
         self.assertEqual(self.events('?kind=registered')['events'],[])

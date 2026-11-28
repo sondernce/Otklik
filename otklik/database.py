@@ -11,7 +11,7 @@ from timestamps import instant
 from publications import publish
 
 MIGRATION_LOCK = threading.RLock()
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 
 class UnsupportedSchema(ValueError):
@@ -151,6 +151,10 @@ def migrate(db, path):
             accounts.install(db)
             outcomes.install(db)
             db.execute('PRAGMA user_version=10')
+        if db.execute('PRAGMA user_version').fetchone()[0] == 10:
+            import registration
+            registration.install(db)
+            db.execute('PRAGMA user_version=11')
         db.commit()
     except Exception:
         db.rollback()

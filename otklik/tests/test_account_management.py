@@ -59,7 +59,7 @@ class AccountTest(unittest.TestCase):
 
     def test_block_revokes_sessions_and_links_and_unblock_never_revives_them(self):
         client=self.client();self.client('other');self.change();token,_=self.token()
-        item=self.account();old=self.cookies['client']
+        item=next(x for x in self.request('admin','GET','/api/admin/accounts?role=client')[1]['accounts'] if x['id']==client['id']);old=self.cookies['client']
         with server.connection() as db:access.issue(db,'client',client['id'])
         self.assertEqual(self.block(item)[0],200)
         self.assertEqual(self.request('client','GET','/api/client/me')[0],401)
@@ -68,7 +68,7 @@ class AccountTest(unittest.TestCase):
         self.assertEqual(self.request('anonymous','POST','/api/client/account/confirm-email',{'token':token})[0],400)
         self.assertEqual(self.block(item)[0],200)
         with server.connection() as db:self.assertEqual(db.execute('SELECT count(*) FROM client_sessions WHERE client_id=?',(client['id'],)).fetchone()[0],0)
-        item=self.account();self.assertEqual(self.block(item,'active')[0],200)
+        item=next(x for x in self.request('admin','GET','/api/admin/accounts?role=client')[1]['accounts'] if x['id']==client['id']);self.assertEqual(self.block(item,'active')[0],200)
         self.cookies['client']=old
         self.assertEqual(self.request('client','GET','/api/client/me')[0],401)
         self.assertEqual(self.request('client','POST','/api/client/login',{'email':client['email'],'password':'client-password'})[0],200)
@@ -207,7 +207,7 @@ class AccountTest(unittest.TestCase):
         with closing(sqlite3.connect(server.DB)) as db:
             self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],9)
             self.assertFalse(db.execute("SELECT 1 FROM sqlite_master WHERE name='account_states'").fetchone())
-        with server.connection() as db:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],10)
+        with server.connection() as db:self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0],database.SCHEMA_VERSION)
         self.assertTrue(list((server.DB.parent/'backups').glob('*')))
 
     def test_block_and_confirmation_race_never_leaves_a_valid_session(self):
@@ -233,6 +233,8 @@ class AccountTest(unittest.TestCase):
     def test_deleted_client_does_not_close_same_email_psychologist(self):
         self.client()
         self.assertEqual(self.request('same','POST','/api/psychologist/register',{'email':'client@test.invalid','password':'test-psychologist-password'})[0],200)
+        import test_server
+        test_server.complete_registration(self,'same','psychologist','client@test.invalid')
         self.assertEqual(self.erase()[0],200)
         self.assertEqual(self.request('same','GET','/api/psychologist/me')[0],200)
 

@@ -24,8 +24,18 @@ class EmailTest(unittest.TestCase):
     setUp=test_booking.BookingTest.setUp
     tearDown=test_booking.BookingTest.tearDown
     request=test_booking.BookingTest.request
-    psy=test_booking.BookingTest.psy
-    client=test_booking.BookingTest.client
+    def legacy_email(self,role,item):
+        # Existing accounts created before email verification remain supported.
+        with server.connection() as db:
+            db.execute('UPDATE email_status SET verified_at=NULL WHERE role=? AND account_id=?',(role,item['id'] if role=='client' else item['owner_id']))
+            email_access.issue(db,role,{'id':item['id'] if role=='client' else item['owner_id'],'email':item['email']},'verify',f'http://127.0.0.1:{server.PORT}')
+        return item
+
+    def client(self,who='client'):
+        return self.legacy_email('client',test_booking.BookingTest.client(self,who))
+
+    def psy(self,who='psy'):
+        return self.legacy_email('psychologist',test_booking.BookingTest.psy(self,who))
 
     def link(self,role='client',purpose='verify'):
         with server.connection() as db:
@@ -40,7 +50,7 @@ class EmailTest(unittest.TestCase):
     def reset_request(self,role='client',email='client@test.invalid'):
         return self.request('anonymous','POST',f'/api/{role}/password/request-reset',{'email':email})
 
-    def test_registration_queues_private_confirmation_atomically_for_both_roles(self):
+    def test_existing_accounts_can_confirm_email_for_both_roles(self):
         self.client();self.psy()
         for role in ('client','psychologist'):
             token,row=self.link(role)
@@ -200,6 +210,7 @@ class EmailTest(unittest.TestCase):
 
     def test_limits_do_not_reveal_account_and_valid_tokens_have_independent_buckets(self):
         self.client()
+        with server.connection() as db:db.execute('DELETE FROM email_requests')
         for index in range(13):
             # Different bearer values must not share a global account limiter.
             self.assertEqual(self.consume((str(index).zfill(2)+'a'*41))[0],400)
@@ -228,5 +239,7 @@ class EmailTest(unittest.TestCase):
         origin=f'http://localhost:{server.PORT}'
         conn.request('POST','/api/client/register',json.dumps({'name':'Клиент','email':'host-alias@test.invalid','password':'client-password'}),{'Origin':origin,'Content-Type':'application/json'})
         reply=conn.getresponse();body=reply.read();conn.close();self.assertEqual(reply.status,200,body)
-        _,item=self.link()
-        self.assertTrue(origin+'/account-access#' in item['body'])
+        with server.connection() as db:
+            item=db.execute('SELECT body FROM mail_outbox ORDER BY created_at DESC LIMIT 1').fetchone()
+        self.assertIn('Код подтверждения:',item['body'])
+        self.assertNotIn('http://',item['body'])

@@ -11,6 +11,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import server
 
 
+def complete_registration(test,who,role,email):
+    import re
+    with server.connection() as db:
+        row=db.execute('SELECT q.body FROM pending_registrations p JOIN mail_outbox q ON p.mail_id=q.id WHERE p.role=? AND p.email=? ORDER BY p.created_at DESC LIMIT 1',(role,email)).fetchone()
+    assert row, 'Expected registration challenge'
+    code=re.search(r'Код подтверждения: (\d{6})',row['body'])[1]
+    status,result=test.request(who,'POST',f'/api/{role}/registration/confirm',{'code':code})
+    test.assertEqual(status,200,result)
+
+
 class WorkflowTest(unittest.TestCase):
     def setUp(self):
         local_mail=patch.dict('os.environ',{'OTKLIK_MAIL_TRANSPORT':'local'})
@@ -48,6 +58,7 @@ class WorkflowTest(unittest.TestCase):
     def psy(self, who='psy'):
         code, _ = self.request(who, 'POST', '/api/psychologist/register', {'email': f'{who}@test.invalid', 'password': 'test-psychologist-password'})
         self.assertEqual(code, 200)
+        complete_registration(self,who,'psychologist',f'{who}@test.invalid')
         return self.request(who, 'GET', '/api/psychologist/me')[1]['profile']
 
     def saved(self, p, who='psy'):

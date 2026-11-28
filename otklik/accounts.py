@@ -177,7 +177,7 @@ def erase(db,role,ident,data):
         for row in rows:
             profile=json.loads(row['data'])
             for key in ('bio','education','approach','contact','photo','email','review_note'):profile[key]=''
-            profile.update(name=replacement,initials='У',topics=[],slots=[],hidden=True,deleted=True,published=False,revision=profile.get('revision',0)+1)
+            profile.update(age=None,name=replacement,initials='У',topics=[],slots=[],hidden=True,deleted=True,published=False,revision=profile.get('revision',0)+1)
             profile['history']=[{k:v for k,v in item.items() if k in ('at','action','actor')} for item in profile.get('history',[])]
             db.execute('UPDATE profiles SET data=? WHERE id=?',(json.dumps(profile,ensure_ascii=False),row['id']))
             db.execute('DELETE FROM profile_publications WHERE profile_id=?',(row['id'],))

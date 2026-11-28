@@ -16,10 +16,12 @@ before(async () => {
     ...(process.env.BROWSER_EXECUTABLE_PATH ? {executablePath:process.env.BROWSER_EXECUTABLE_PATH} : {}),
     args:process.env.BROWSER_NO_SANDBOX === '1' ? ['--no-sandbox'] : [],
   });
-  admin = await browser.newContext();
+  admin = await newTestContext();
   await post(admin, '/api/setup', {password:'test-admin-password'});
 });
 after(async () => {await browser?.close();});
+// Each context represents a different visitor; retain real limits within that visitor.
+async function newTestContext(options={}) { return browser.newContext({...options,extraHTTPHeaders:{'X-Otklik-Test-IP':randomUUID(),...options.extraHTTPHeaders}}); }
 
 async function post(context, path, data) {
   let response = await context.request.post(origin+path, {data, headers:{Origin:origin}});
@@ -31,7 +33,19 @@ async function post(context, path, data) {
   }
   const body = await response.json();
   assert.equal(response.status(), 200, JSON.stringify(body));
+  if (/\/api\/(client|psychologist)\/register$/.test(path) && body.verification_required) {
+    const role=path.split('/')[2];
+    await post(context,`/api/${role}/registration/confirm`,{code:registrationCode(data.email,role)});
+  }
   return body;
+}
+function registrationCode(email,role='client') {
+  const {execFileSync}=require('node:child_process');
+  const script=`import sqlite3,sys,re
+with sqlite3.connect(sys.argv[1]) as db:
+    row=db.execute('SELECT q.body FROM pending_registrations p JOIN mail_outbox q ON q.id=p.mail_id WHERE p.email=? AND p.role=? ORDER BY p.created_at DESC LIMIT 1',(sys.argv[2],sys.argv[3])).fetchone()
+print(re.search(r'Код подтверждения: (\\d{6})',row[0])[1])`;
+  return execFileSync(process.env.OTKLIK_TEST_PYTHON||'python3',['-B','-c',script,process.env.OTKLIK_TEST_DATABASE,email.toLowerCase(),role],{encoding:'utf8'}).trim();
 }
 async function get(context, path) {
   const response = await context.request.get(origin+path);
@@ -44,9 +58,9 @@ async function capture(page, name) {
   fs.mkdirSync(folder,{recursive:true});
   await page.screenshot({path:path.join(folder,name),fullPage:true});
 }
-async function fixture(t, {registerClient=true, name='Тестовый психолог'}={}) {
+async function fixture(t, {registerClient=true, name='Тестовый психолог',topics=['anxiety'],age=null}={}) {
   const errors = [];
-  const psy = await browser.newContext(), client = await browser.newContext();
+  const psy = await newTestContext(), client = await newTestContext();
   for (const context of [psy,client]) context.on('page', page => {
     page.on('pageerror', error => errors.push(error.message));
     page.on('dialog', dialog => dialog.accept());
@@ -57,7 +71,7 @@ async function fixture(t, {registerClient=true, name='Тестовый псих�
   let profile = (await get(psy, '/api/psychologist/me')).profile;
   profile = (await post(psy, '/api/psychologist/profile', {
     revision:profile.revision,name,gender:'female',price:3000,experience:5,style:'gentle',approach:'КПТ',
-    bio:'Профиль для проверки записи и изменения встреч.',education:'Учебное заведение и программа',topics:['anxiety'],photo:'',contact:'private-test-contact',
+    bio:'Профиль для проверки записи и изменения встреч.',education:'Учебное заведение и программа',topics,age,photo:'',contact:'private-test-contact',
   })).profile;
   profile = (await post(psy, '/api/psychologist/submit', {revision:profile.revision})).profile;
   profile = (await post(admin, '/api/admin/review', {id:profile.id,revision:profile.revision,action:'approve'})).profile;
@@ -73,7 +87,7 @@ async function bookingDraft(f) {
   await f.page.goto(origin+'/');
   await f.page.evaluate(({profile,slots,key}) => {
     sessionStorage.setItem('otklik-booking-draft', JSON.stringify({psychologist_id:profile.id,start_at:slots[0],request_key:key,name:profile.name,price:profile.price}));
-    sessionStorage.setItem('otklik-flow-answers', JSON.stringify({topic:'anxiety',budget:'5000',gender:'any',time:'any',style:'any'}));
+    sessionStorage.setItem('otklik-flow-answers', JSON.stringify({topic:'anxiety',budget:'5000'}));
   }, {profile:f.profile,slots:f.slots,key:randomUUID()});
   await f.page.goto(origin+'/client#book');
   await f.page.locator('#book').waitFor({state:'visible'});
@@ -87,9 +101,17 @@ async function confirmed(f) {
 test('questionnaire → registration → booking → confirmation, including mobile and reload', async t => {
   const f = await fixture(t, {registerClient:false});
   await f.page.goto(origin+'/'); await f.page.locator('[data-start]').first().click();
-  for (const value of ['anxiety','5000','any','any','any']) {
-    await f.page.locator(`input[type=radio][value="${value}"]`).check(); await f.page.locator('#next').click();
+  assert.equal(await f.page.locator('.questionnaire-grid > fieldset').count(),3);
+  assert.equal(await f.page.locator('#specialist-preferences').isVisible(),false);
+  for (const [key,value] of Object.entries({topic:'anxiety',budget:'5000'})) {
+    await f.page.locator(`input[name="${key}"][value="${value}"]`).check();
   }
+  await f.page.locator('#next').click();
+  await f.page.locator('[data-action="edit"]').first().click();
+  assert.equal(await f.page.locator('input[name=topic][value=anxiety]').isChecked(),true);
+  assert.equal(await f.page.locator('input[name=budget][value="5000"]').isChecked(),true);
+  await f.page.locator('input[name="budget"][value="3500"]').check();
+  await f.page.locator('#next').click();
   // Other test profiles must never make this scenario choose a different specialist.
   await f.page.locator(`[data-person="${f.profile.id}"]`).click();
   await f.page.locator('[data-time="17:30"]').click(); await f.page.locator('#confirm').click();
@@ -97,8 +119,13 @@ test('questionnaire → registration → booking → confirmation, including mob
   await f.page.locator('#client-name').fill('Тестовый клиент');
   await f.page.locator('#client-age').fill('30');
   await f.page.locator('#client-email').fill(f.email); await f.page.locator('#client-password').fill('test-client-password');
-  await f.page.locator('#client-auth-submit').click(); await f.page.locator('#book').waitFor({state:'visible'});
-  assert.equal(await f.page.evaluate(() => JSON.parse(sessionStorage.getItem('otklik-flow-answers')).topic), 'anxiety');
+  await f.page.setViewportSize({width:390,height:844});
+  await f.page.locator('#client-auth-submit').click();await f.page.waitForURL('**/registration#role=client');
+  assert.equal((await f.client.request.get(origin+'/api/client/me')).status(),401);
+  await f.page.locator('#registration-code').fill(registrationCode(f.email));
+  await f.page.locator('#registration-confirm').click();
+  await f.page.locator('#book').waitFor({state:'visible'});
+  assert.deepEqual(await f.page.evaluate(() => JSON.parse(sessionStorage.getItem('otklik-flow-answers')).topic), ['anxiety']);
   await f.page.locator('#book').click(); await f.page.getByText('Заявка отправлена. Психолог ответит').waitFor();
   const item = (await get(f.client, '/api/client/appointments')).appointments[0];
   await f.psyPage.goto(origin+'/psychologist');
@@ -513,7 +540,7 @@ test('admin overview timeout keeps filters and can be manually retried',async t=
 });
 
 test('late admin monitoring response cannot restore data after logout',async t=>{
-  const isolated=await browser.newContext(),page=await isolated.newPage();t.after(()=>isolated.close());
+  const isolated=await newTestContext(),page=await isolated.newPage();t.after(()=>isolated.close());
   await post(isolated,'/api/login',{password:'test-admin-password'});
   let release,captured,delivered;
   const gate=new Promise(resolve=>{release=resolve;}),ready=new Promise(resolve=>{captured=resolve;}),done=new Promise(resolve=>{delivered=resolve;});
@@ -541,7 +568,7 @@ test('client home opens its real meeting, keeps section on reload and validates 
   await f.page.locator('[data-client-tab="settings"]').click();
   await f.page.goBack();
   await f.page.locator('[data-client-view="meetings"]').waitFor({state:'visible'});
-  const anon=await browser.newContext();t.after(()=>anon.close());const page=await anon.newPage();
+  const anon=await newTestContext();t.after(()=>anon.close());const page=await anon.newPage();
   await page.goto(origin+'/client');await page.locator('#client-auth-submit').click();
   for(const id of ['client-name','client-age','client-email','client-password'])assert.equal(await page.locator('#'+id).getAttribute('aria-invalid'),'true');
 });
@@ -552,9 +579,15 @@ function localAccessLink(email,purpose){
 from pathlib import Path
 from email import policy
 from email.parser import BytesParser
-import database,mail_worker
+import database,mail_worker,email_access
 path=Path(sys.argv[1])
 with database.connect(path) as db:
+    if sys.argv[3]=='verify':
+        for role,table in [('client','clients'),('psychologist','psychologists')]:
+            item=db.execute('SELECT id,email FROM '+table+' WHERE email=?',(sys.argv[2],)).fetchone()
+            if item:
+                db.execute('UPDATE email_status SET verified_at=NULL WHERE role=? AND account_id=?',(role,item['id']))
+                email_access.issue(db,role,item,'verify',sys.argv[4]);break
     row=(db.execute('SELECT mail_id FROM email_changes WHERE new_email=? ORDER BY created_at DESC LIMIT 1',(sys.argv[2],)) if sys.argv[3]=='change' else db.execute('SELECT mail_id FROM email_tokens WHERE email=? AND purpose=? ORDER BY created_at DESC LIMIT 1',(sys.argv[2],sys.argv[3]))).fetchone()
     if row is None:raise RuntimeError('Missing test email')
     ident=row['mail_id']
@@ -562,7 +595,7 @@ mail_worker.run_once(path,limit=100)
 message=BytesParser(policy=policy.default).parsebytes((path.parent/'mail-preview'/(ident+'.eml')).read_bytes())
 print(re.search(r'http[^\\s]+/account-access#[^\\s]+',message.get_content()).group())`;
   assert.ok(process.env.OTKLIK_TEST_DATABASE);
-  return execFileSync('python',['-B','-c',script,process.env.OTKLIK_TEST_DATABASE,email,purpose],{encoding:'utf8'}).trim();
+  return execFileSync(process.env.OTKLIK_TEST_PYTHON||'python3',['-B','-c',script,process.env.OTKLIK_TEST_DATABASE,email,purpose,origin],{encoding:'utf8'}).trim();
 }
 
 test('client email confirmation uses a local message, keeps booking draft and requires explicit action',async t=>{
@@ -617,10 +650,12 @@ test('password recovery preserves fields and draft after lost reply and supports
 });
 
 test('psychologist can confirm email from local preview and refresh confirmation in settings',async t=>{
-  const f=await fixture(t);await f.psyPage.goto(origin+'/psychologist#settings');
+  const f=await fixture(t);
   const email=(await get(f.psy,'/api/psychologist/me')).email;
+  const link=localAccessLink(email,'verify');
+  await f.psyPage.goto(origin+'/psychologist#settings');
   await f.psyPage.locator('#psychologist-email-access').getByText('Электронная почта пока не подтверждена.',{exact:true}).waitFor();
-  const link=localAccessLink(email,'verify'),confirmation=await f.psy.newPage();t.after(()=>confirmation.close());
+  const confirmation=await f.psy.newPage();t.after(()=>confirmation.close());
   await confirmation.goto(link);await confirmation.getByRole('button',{name:'Подтвердить почту',exact:true}).click();
   await confirmation.getByText('Почта подтверждена.',{exact:true}).waitFor();
   await f.psyPage.locator('#psychologist-email-access').getByRole('button',{name:'Обновить подтверждение',exact:true}).click();
@@ -707,7 +742,7 @@ test('account deletion requires cancelling meetings and retains conversation his
 function finishTestMeeting(id){
   const {execFileSync}=require('node:child_process');
   assert.ok(process.env.OTKLIK_TEST_DATABASE);
-  execFileSync('python',['-B','-c',`import sys,database
+  execFileSync(process.env.OTKLIK_TEST_PYTHON||'python3',['-B','-c',`import sys,database
 with database.connect(sys.argv[1]) as db:
     db.execute("UPDATE appointments SET start_at='2000-01-01T12:00:00+00:00',end_at='2000-01-01T12:50:00+00:00' WHERE id=?",(sys.argv[2],))`,process.env.OTKLIK_TEST_DATABASE,id]);
 }
@@ -735,4 +770,60 @@ test('meeting outcomes retain a lost response, flag disagreement and allow admin
   assert.equal(await card.locator('[data-outcome-value]').count(),0);
   await f.page.setViewportSize({width:390,height:844});assert.ok(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
   await capture(f.page,'meeting-outcome-mobile.png');
+});
+
+test('psychologist registration waits for code, survives reload and corrects the email on mobile',async t=>{
+  const context=await newTestContext({viewport:{width:390,height:844}}),page=await context.newPage();t.after(()=>context.close());
+  const email=`pending-${randomUUID()}@test.invalid`,corrected=`correct-${randomUUID()}@test.invalid`;
+  await page.goto(origin+'/psychologist#register');await page.locator('#auth').waitFor({state:'visible'});
+  await page.locator('#email').fill(email);await page.locator('#password').fill('new-psychologist-password');await page.locator('#auth-submit').click();
+  await page.waitForURL('**/registration#role=psychologist');await page.locator('#registration-content').waitFor({state:'visible'});
+  assert.equal((await context.request.get(origin+'/api/psychologist/me')).status(),401);
+  assert.equal(await page.locator('#registration-resend').isDisabled(),true);
+  const old=registrationCode(email,'psychologist');
+  await page.locator('#registration-code').fill(old==='000000'?'111111':'000000');await page.locator('#registration-confirm').click();
+  await page.locator('#registration-code[aria-invalid="true"]').waitFor();
+  await page.reload();await page.locator('#registration-email').getByText(email,{exact:true}).waitFor();
+  await page.locator('#registration-edit').click();await page.locator('#registration-new-email').fill(corrected);
+  await page.locator('#registration-email-form').getByRole('button',{name:'Отправить код на этот адрес',exact:true}).click();
+  await page.locator('#registration-email').getByText(corrected,{exact:true}).waitFor();
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await capture(page,'registration-code-mobile.png');
+  await page.locator('#registration-code').fill(registrationCode(corrected,'psychologist'));await page.locator('#registration-confirm').click();
+  await page.locator('#workspace').waitFor({state:'visible'});assert.equal((await get(context,'/api/psychologist/me')).email,corrected);
+});
+
+test('expanded topics and optional specialist preferences filter accurately and preserve old answers',async t=>{
+ const topics=['anxiety','boundaries','sleep'];
+ const f=await fixture(t,{name:'Подходящий специалист',topics,age:35});
+ const older=await fixture(t,{name:'Другой возраст',topics,age:55});
+ const partial=await fixture(t,{name:'Другая специализация',topics:['anxiety'],age:35});
+ await f.page.goto(origin+'/');
+ await f.page.evaluate(()=>sessionStorage.setItem('otklik-flow-answers',JSON.stringify({topic:'anxiety',budget:'7000',gender:'any',time:'day',age:'30_39'})));
+ await f.page.reload();await f.page.locator('[data-start]').first().click();
+ assert.equal(await f.page.locator('input[name=topic][value=anxiety]').isChecked(),true);
+ assert.equal(await f.page.locator('input[name=preferences][value=custom]').isChecked(),true);
+ assert.equal(await f.page.locator('input[name=time][value=day]').isChecked(),true);
+ assert.equal(await f.page.locator('input[name=style]').count(),0);
+ await f.page.locator('input[name=topic][value=boundaries]').check();
+ await f.page.locator('#next').click();await f.page.locator(`[data-person="${f.profile.id}"]`).waitFor();
+ assert.equal(await f.page.locator(`[data-person="${older.profile.id}"]`).count(),0);
+ assert.equal(await f.page.locator(`[data-person="${partial.profile.id}"]`).count(),0);
+ await f.page.locator(`[data-person="${f.profile.id}"]`).click();
+ await f.page.locator('[data-time="17:30"]').waitFor({state:'visible'});
+ await f.page.locator('[data-action=results]').click();await f.page.locator('[data-action=edit]').first().click();
+ await f.page.locator('input[name=preferences][value=none]').check();
+ assert.equal(await f.page.locator('#specialist-preferences').isVisible(),false);
+ await f.page.locator('#next').click();await f.page.locator(`[data-person="${older.profile.id}"]`).waitFor();
+ assert.equal(await f.page.locator(`[data-person="${partial.profile.id}"]`).count(),0);
+ await f.page.locator('[data-action=edit]').first().click();await f.page.locator('input[name=preferences][value=custom]').check();
+ assert.equal(await f.page.locator('input[name=age][value="30_39"]').isChecked(),true);
+ await f.page.locator('input[name=topic][value=unknown]').check();
+ assert.equal(await f.page.locator('input[name=topic]:checked').count(),1);
+ await f.page.locator('input[name=topic][value=anxiety]').check();
+ assert.equal(await f.page.locator('input[name=topic][value=unknown]').isChecked(),false);
+ await f.page.locator('input[name=time][value=evening]').check();
+ assert.equal(await f.page.locator('input[name=time]:checked').count(),2);
+ await f.page.setViewportSize({width:390,height:844});
+ assert.ok(await f.page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+ await capture(f.page,'expanded-preferences-mobile.png');
 });
